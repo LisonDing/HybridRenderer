@@ -200,6 +200,88 @@ void VulkanContext::CreateSwapchain(uint32_t width, uint32_t height) {
         return;
     }
     HR_LOG_INFO("VulkanContext: Swapchain (Triple Buffering) created successfully.");
+
+    // 【新增】保存格式和分辨率，后续非常重要
+    m_SwapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    m_SwapchainExtent = { width, height };
+
+    // 【新增】把显卡在 Swapchain 里自动帮我们建好的图片 (VkImage) 拿出来
+    uint32_t imageCount;
+    vkGetSwapchainImagesKHR(m_Device, m_Swapchain, &imageCount, nullptr);
+    m_SwapchainImages.resize(imageCount);
+    vkGetSwapchainImagesKHR(m_Device, m_Swapchain, &imageCount, m_SwapchainImages.data());
+}
+
+void VulkanContext::CreateImageViews() {
+    m_SwapchainImageViews.resize(m_SwapchainImages.size());
+
+    for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
+        VkImageViewCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.image = m_SwapchainImages[i];
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;     // 明确告诉它是 2D 图像
+        createInfo.format = m_SwapchainImageFormat;      // 保持和 Swapchain 相同的颜色格式
+
+        // 颜色通道映射（通常保持默认的 1:1 映射即可）
+        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+        // 描述图像的用途：它是颜色图，没有 Mipmap，只有 1 层
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(m_Device, &createInfo, nullptr, &m_SwapchainImageViews[i]) != VK_SUCCESS) {
+            HR_LOG_ERROR("VulkanContext: Failed to create Image Views!");
+            return;
+        }
+    }
+    HR_LOG_INFO("VulkanContext: Swapchain Image Views created.");
+}
+
+void VulkanContext::CreateRenderPass() {
+    // 1. 颜色附件 (Attachment) 描述：我们要画的这块画布有什么特性？
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = m_SwapchainImageFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // 无多重采样抗锯齿 (MSAA)
+    
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   // 关键：渲染前，清空这块内存的内容
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // 关键：渲染后，保留内容以便显示到屏幕上
+    
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // 我们目前不用模板测试
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      // 渲染前，我们不在乎图像原本是什么排布
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  // 渲染后，必须转换成能被屏幕显示的排布格式
+
+    // 2. 颜色附件引用：给具体的 Subpass 用的
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0; // 对应上面 colorAttachment 的索引
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 渲染时，让显卡将其优化为颜色写入模式
+
+    // 3. 子通道 (Subpass) 描述
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; // 这是一条图形管线，不是 Compute 管线
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+
+    // 4. 正式创建 Render Pass
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+
+    if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create Render Pass!");
+        return;
+    }
+    HR_LOG_INFO("VulkanContext: Render Pass created.");
 }
 
 void VulkanContext::Cleanup() {
@@ -208,6 +290,15 @@ void VulkanContext::Cleanup() {
     // 注意：VkPhysicalDevice 是物理客观存在的显卡，不需要我们去 Destroy，
     // 我们只需要销毁我们在内存中创建的逻辑对象 (m_Instance)。
 
+    if (m_RenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+        HR_LOG_INFO("VulkanContext: Render Pass destroyed.");
+    }
+    for (auto imageView : m_SwapchainImageViews) {
+        vkDestroyImageView(m_Device, imageView, nullptr);
+    }
+        HR_LOG_INFO("VulkanContext: Swapchain Image Views destroyed.");
+        
     if (m_Swapchain != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(m_Device, m_Swapchain, nullptr);
         HR_LOG_INFO("VulkanContext: Swapchain destroyed.");

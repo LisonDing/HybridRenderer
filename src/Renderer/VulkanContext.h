@@ -48,8 +48,16 @@ public:
     // 创建交换链（画板翻滚系统）
     void CreateSwapchain(uint32_t width, uint32_t height);
 
+    // 创建图像视图（观察镜头）
+    void CreateImageViews();
+
+    // 创建渲染通道（画布）
+    void CreateRenderPass();
+
     // 清理资源
     void Cleanup();
+
+    
 
 private:
     // 【Vulkan 教学】：句柄 (Handle)
@@ -61,7 +69,7 @@ private:
     QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
     
     VkInstance       m_Instance       = VK_NULL_HANDLE; // 应用程序与 Vulkan 库的连接桥梁
-    
+
     VkSurfaceKHR     m_Surface        = VK_NULL_HANDLE; // 【新增】画布
 
     VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE; // 物理显卡的抽象表示
@@ -71,6 +79,15 @@ private:
     VkQueue          m_PresentQueue   = VK_NULL_HANDLE; // 【新增】显示队列
 
     VkSwapchainKHR   m_Swapchain      = VK_NULL_HANDLE; // 【新增】交换链
+
+    // Swapchain 的属性
+    VkFormat         m_SwapchainImageFormat = VK_FORMAT_UNDEFINED;
+    VkExtent2D       m_SwapchainExtent = {0, 0};
+
+    std::vector<VkImage> m_SwapchainImages;         // 显卡自动分配的实体图像
+    std::vector<VkImageView> m_SwapchainImageViews; // 我们为其创建的观察镜头
+
+    VkRenderPass     m_RenderPass     = VK_NULL_HANDLE; // 渲染通道
 };
 
 } // namespace Renderer

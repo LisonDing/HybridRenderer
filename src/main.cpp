@@ -49,6 +49,10 @@ int main() {
     // 创建交换链
     vkContext.CreateSwapchain(WIDTH, HEIGHT);
 
+    // 创建图像视图和渲染通道
+    vkContext.CreateImageViews();
+    vkContext.CreateRenderPass();
+
     // 引擎主循环
     HR_LOG_INFO("Entering Main Loop...");
     while (!glfwWindowShouldClose(window)) {
