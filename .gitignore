@@ -1,0 +1,19 @@
+# CMake & Build artifacts
+build/
+bin/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# Mac OS specific
+.DS_Store
+
+# IDEs (VSCode, CLion, etc.)
+.vscode/
+.idea/
+*.swp
+*.swo

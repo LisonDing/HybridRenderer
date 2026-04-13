@@ -1,0 +1,234 @@
+
+#include "VulkanContext.h"
+#include "../Core/Logger.h"
+#include <set>
+#include <string>
+
+namespace Renderer {
+
+bool VulkanContext::Init(const std::vector<const char*>& windowExtensions) {
+    // 1. 准备扩展列表 (融合窗口扩展 + 苹果专属扩展)
+    std::vector<const char*> extensions = windowExtensions;
+
+#ifdef __APPLE__
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    HR_LOG_INFO("VulkanContext: Injected Apple Portability Extension.");
+#endif
+
+    // 【Vulkan 教学】：显式 API (Explicit API) 的哲学
+    // Vulkan 不做任何假设。你需要用结构体 (Struct) 把所有细节填好递交给它。
+    // 所有 Vulkan 结构体都必须设置 sType (Structure Type)，这是为了驱动在解析内存时不会读错。
+    
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "Hybrid Renderer";
+    appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.pEngineName = "No Engine";
+    appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+    appInfo.apiVersion = VK_API_VERSION_1_3; 
+
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = &appInfo;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+    createInfo.ppEnabledExtensionNames = extensions.data();
+
+#ifdef __APPLE__
+    // 告诉驱动：我们要包含那些非原生（转译）的 Vulkan 设备（即 MoltenVK）
+    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+    if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create Vulkan Instance!");
+        return false;
+    }
+    
+    HR_LOG_INFO("VulkanContext: Vulkan Instance created successfully.");
+    return true;
+}
+
+void VulkanContext::PickPhysicalDevice() {
+    // 【Vulkan 教学】：获取列表的“两步走”模式
+    // 在 Vulkan 中获取数组数据，标准做法总是分两步：
+    // 第一步：传入 nullptr，让 Vulkan 告诉你数组有多大（数量）。
+    // 第二步：分配好内存后，再调一次函数，真正把数据填进来。
+    
+    uint32_t deviceCount = 0;
+    vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
+
+    if (deviceCount == 0) {
+        HR_LOG_ERROR("VulkanContext: Failed to find GPUs with Vulkan support!");
+        return;
+    }
+
+    std::vector<VkPhysicalDevice> devices(deviceCount);
+    vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
+
+    // 简单起见，我们直接挑选第一个设备 (对于 Mac 通常就是 M 系列芯片)
+    // 在后续的工业级开发中，我们会给显卡打分（比如独立显卡加分，支持几何着色器加分）来挑选。
+    m_PhysicalDevice = devices[0];
+
+    // 查询并打印显卡属性
+    VkPhysicalDeviceProperties deviceProperties;
+    vkGetPhysicalDeviceProperties(m_PhysicalDevice, &deviceProperties);
+    
+    HR_LOG_INFO(std::string("VulkanContext: Picked Physical Device: ") + deviceProperties.deviceName);
+}
+
+QueueFamilyIndices VulkanContext::FindQueueFamilies(VkPhysicalDevice device) {
+    QueueFamilyIndices indices;
+
+    // 获取当前显卡支持的所有队列族（车间）
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+    // 遍历这些车间，寻找我们需要的能力
+    int i = 0;
+    for (const auto& queueFamily : queueFamilies) {
+        // 寻找一个支持图形绘制 (Graphics) 的车间
+        if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            indices.graphicsFamily = i;
+        }
+
+        // 查询该车间是否支持向我们提供的 Surface 输出画面
+        VkBool32 presentSupport = false;
+        vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_Surface, &presentSupport);
+        if (presentSupport) {
+            indices.presentFamily = i;
+        }
+
+        if (indices.IsComplete()) break;
+        i++;
+    }
+
+    return indices;
+}
+
+void VulkanContext::CreateLogicalDevice() {
+    // 1. 查找我们需要使用的队列族
+    QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
+    // if (!indices.IsComplete()) {
+    //     HR_LOG_ERROR("VulkanContext: Failed to find suitable queue families!");
+    //     return;
+    // }
+
+    // 【架构升级】：使用 std::set 自动去重。
+    // 如果画图和显示是同一个车间，set 里就只有 1 个元素；如果是不同的车间，就有 2 个元素。
+    std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+    std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+
+    // 2. 填写队列创建信息
+    float queuePriority = 1.0f;
+    for (uint32_t queueFamily : uniqueQueueFamilies) {
+        VkDeviceQueueCreateInfo queueCreateInfo{};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = queueFamily;
+        queueCreateInfo.queueCount = 1;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+        queueCreateInfos.push_back(queueCreateInfo);
+    }
+
+    VkPhysicalDeviceFeatures deviceFeatures{};
+
+    std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+#ifdef __APPLE__
+    // Mac 的 MoltenVK 通常需要开启子集兼容扩展
+    deviceExtensions.push_back("VK_KHR_portability_subset");
+#endif
+
+    VkDeviceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+    createInfo.pQueueCreateInfos = queueCreateInfos.data();
+    createInfo.pEnabledFeatures = &deviceFeatures;
+    
+    // 启用扩展！
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+
+    if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create logical device!");
+        return;
+    }
+    HR_LOG_INFO("VulkanContext: Logical Device created successfully.");
+
+    vkGetDeviceQueue(m_Device, indices.graphicsFamily.value(), 0, &m_GraphicsQueue);
+    HR_LOG_INFO("VulkanContext: Graphics Queue retrieved.");
+    
+    vkGetDeviceQueue(m_Device, indices.presentFamily.value(), 0, &m_PresentQueue);
+    HR_LOG_INFO("VulkanContext: Present Queue retrieved.");
+}
+
+
+void VulkanContext::CreateSwapchain(uint32_t width, uint32_t height) {
+    // 1. 设置画面的基本属性：大小、颜色格式（我们使用标准的 8位 SRGB 颜色空间）
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = m_Surface;
+
+    // 为了避免过于复杂的底层查询，我们针对 Mac / 通用 PC 写死几个最常用的标准值
+    createInfo.minImageCount = 3; // 开启三缓冲 (Triple Buffering)，大幅提升帧率稳定性
+    createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB; 
+    createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    createInfo.imageExtent = { width, height };
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // 我们要把它当作颜色渲染目标
+
+    QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
+    uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
+
+    // 如果画图和显示不是同一个车间，我们需要让图片在车间之间共享
+    if (indices.graphicsFamily != indices.presentFamily) {
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        createInfo.queueFamilyIndexCount = 2;
+        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+    } else {
+        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    }
+
+    createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR; // 不做任何画面翻转（如手机屏幕旋转）
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;   // 忽略 Alpha 通道，不与操作系统窗口混合
+    createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;               // FIFO = 开启垂直同步(V-Sync)，Mac 下兼容性最好
+    createInfo.clipped = VK_TRUE; // 被其他窗口挡住的像素不渲染
+
+    if (vkCreateSwapchainKHR(m_Device, &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create Swapchain!");
+        return;
+    }
+    HR_LOG_INFO("VulkanContext: Swapchain (Triple Buffering) created successfully.");
+}
+
+void VulkanContext::Cleanup() {
+    // 【C++ 架构规范】：安全的资源销毁
+    // 销毁顺序必须与创建顺序严格相反。
+    // 注意：VkPhysicalDevice 是物理客观存在的显卡，不需要我们去 Destroy，
+    // 我们只需要销毁我们在内存中创建的逻辑对象 (m_Instance)。
+
+    if (m_Swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(m_Device, m_Swapchain, nullptr);
+        HR_LOG_INFO("VulkanContext: Swapchain destroyed.");
+    }
+
+    if (m_Device != VK_NULL_HANDLE) {
+        vkDestroyDevice(m_Device, nullptr);
+        m_Device = VK_NULL_HANDLE;
+        HR_LOG_INFO("VulkanContext: Logical Device destroyed.");
+    }
+
+    if (m_Surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr); // Surface 由 Instance 销毁
+        HR_LOG_INFO("VulkanContext: Surface destroyed.");
+    }
+
+    if (m_Instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(m_Instance, nullptr);
+        m_Instance = VK_NULL_HANDLE; // 销毁后置空，防止野指针悬挂
+        HR_LOG_INFO("VulkanContext: Vulkan Instance destroyed.");
+    }
+}
+
+} // namespace Renderer
