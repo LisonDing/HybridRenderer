@@ -33,6 +33,44 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(glfw)
+
+# ==========================================
+# Shader 离线编译管线 (GLSL -> SPIR-V)
+# ==========================================
+
+# 1. 寻找 Vulkan SDK 自带的着色器编译器 glslc
+find_program(GLSLC_EXE NAMES glslc REQUIRED)
+
+# 2. 指定着色器源码目录和编译输出目录
+set(SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/assets/shaders")
+set(SHADER_BIN_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders")
+
+# 确保输出目录存在
+file(MAKE_DIRECTORY ${SHADER_BIN_DIR})
+
+# 3. 收集所有的 shader 源码文件
+file(GLOB SHADER_FILES "${SHADER_SRC_DIR}/*.vert" "${SHADER_SRC_DIR}/*.frag")
+
+set(SPIRV_FILES "")
+
+# 4. 遍历每个 shader 文件，为其生成编译命令
+foreach(SHADER_FILE ${SHADER_FILES})
+    get_filename_component(FILE_NAME ${SHADER_FILE} NAME)
+    set(SPIRV_FILE "${SHADER_BIN_DIR}/${FILE_NAME}.spv")
+    list(APPEND SPIRV_FILES ${SPIRV_FILE})
+
+    # 当源码文件改变时，自动触发 glslc 编译
+    add_custom_command(
+        OUTPUT ${SPIRV_FILE}
+        COMMAND ${GLSLC_EXE} ${SHADER_FILE} -o ${SPIRV_FILE}
+        DEPENDS ${SHADER_FILE}
+        COMMENT "Compiling shader: ${FILE_NAME} -> ${FILE_NAME}.spv"
+    )
+endforeach()
+
+# 5. 创建一个自定义的 Target 专门管理 Shader 编译
+add_custom_target(Shaders DEPENDS ${SPIRV_FILES})
+
 # ==========================================
 # 核心引擎构建 (Target Creation)
 # ==========================================

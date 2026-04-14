@@ -6,6 +6,8 @@
 #include <vector>
 #include <optional> // 用于安全地检查值是否存在
 
+#include <fstream>
+
 // 辅助结构体：记录找到的车间（队列族）的编号
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
@@ -88,6 +90,12 @@ private:
     std::vector<VkImageView> m_SwapchainImageViews; // 我们为其创建的观察镜头
 
     VkRenderPass     m_RenderPass     = VK_NULL_HANDLE; // 渲染通道
+
+    // 静态辅助函数：将二进制文件读取为字节数组
+    static std::vector<char> ReadFile(const std::string& filename);
+    
+    // 将读取的字节数组转化为 Vulkan 能看懂的 Shader 模块
+    VkShaderModule CreateShaderModule(const std::vector<char>& code);
 };
 
 } // namespace Renderer

@@ -6,6 +6,46 @@
 
 namespace Renderer {
 
+std::vector<char> VulkanContext::ReadFile(const std::string& filename) {
+    // 工业规范：ate (从文件末尾开始读取，方便直接获取文件大小)，binary (以二进制模式读取)
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open()) {
+        HR_LOG_ERROR("Failed to open file: " + filename);
+        // 在实际开发中，这里可以抛出异常或导致断言失败
+        return {};
+    }
+
+    // 预分配对应的内存空间
+    size_t fileSize = (size_t)file.tellg();
+    std::vector<char> buffer(fileSize);
+
+    // 回到文件头部，一口气读入所有数据
+    file.seekg(0);
+    file.read(buffer.data(), fileSize);
+    file.close();
+
+    return buffer;
+}
+
+VkShaderModule VulkanContext::CreateShaderModule(const std::vector<char>& code) {
+    VkShaderModuleCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = code.size();
+    
+    // SPIR-V 字节码要求以 uint32_t (4字节) 对齐读取。
+    // vector<char> 的底层数据分配默认满足对齐要求，使用 reinterpret_cast 强转是安全的。
+    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(m_Device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+        HR_LOG_ERROR("Failed to create shader module!");
+        return VK_NULL_HANDLE;
+    }
+    
+    return shaderModule;
+}
+
 bool VulkanContext::Init(const std::vector<const char*>& windowExtensions) {
     // 1. 准备扩展列表 (融合窗口扩展 + 苹果专属扩展)
     std::vector<const char*> extensions = windowExtensions;
@@ -298,7 +338,7 @@ void VulkanContext::Cleanup() {
         vkDestroyImageView(m_Device, imageView, nullptr);
     }
         HR_LOG_INFO("VulkanContext: Swapchain Image Views destroyed.");
-        
+
     if (m_Swapchain != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(m_Device, m_Swapchain, nullptr);
         HR_LOG_INFO("VulkanContext: Swapchain destroyed.");
