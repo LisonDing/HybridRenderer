@@ -1,4 +1,3 @@
-
 #include "VulkanContext.h"
 #include "../Core/Logger.h"
 #include <set>
@@ -6,21 +5,36 @@
 
 namespace Renderer {
 
+// Define 4 independent vertices for a quad.
+// 定义一个矩形的 4 个独立顶点。
+const std::vector<Vertex> VERTICES = {
+    {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}, // Top-Left / 左上
+    {{ 0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}}, // Top-Right / 右上
+    {{ 0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}}, // Bottom-Right / 右下
+    {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}  // Bottom-Left / 左下
+};
+
+// Define index array to assemble 2 triangles from 4 vertices.
+// 定义索引数组，使用 4 个顶点组装出 2 个三角形。
+const std::vector<uint16_t> INDICES = {
+    0, 1, 2, 2, 3, 0
+};
+
 std::vector<char> VulkanContext::ReadFile(const std::string& filename) {
-    // 工业规范：ate (从文件末尾开始读取，方便直接获取文件大小)，binary (以二进制模式读取)
+    // Open file with cursor at the end (ate) and in binary mode to determine file size.
+    // 以二进制模式打开文件，并将读写指针置于文件末尾以获取文件大小。
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
         HR_LOG_ERROR("Failed to open file: " + filename);
-        // 在实际开发中，这里可以抛出异常或导致断言失败
         return {};
     }
 
-    // 预分配对应的内存空间
     size_t fileSize = (size_t)file.tellg();
     std::vector<char> buffer(fileSize);
 
-    // 回到文件头部，一口气读入所有数据
+    // Rewind to the beginning and read the entire file.
+    // 将指针拨回文件头部，一口气读取所有数据。
     file.seekg(0);
     file.read(buffer.data(), fileSize);
     file.close();
@@ -33,8 +47,8 @@ VkShaderModule VulkanContext::CreateShaderModule(const std::vector<char>& code) 
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
     
-    // SPIR-V 字节码要求以 uint32_t (4字节) 对齐读取。
-    // vector<char> 的底层数据分配默认满足对齐要求，使用 reinterpret_cast 强转是安全的。
+    // SPIR-V bytecode requires 32-bit alignment.
+    // SPIR-V 字节码要求 32 位对齐，使用 reinterpret_cast 转换底层的 char 数组是安全的。
     createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
     VkShaderModule shaderModule;
@@ -47,18 +61,15 @@ VkShaderModule VulkanContext::CreateShaderModule(const std::vector<char>& code) 
 }
 
 bool VulkanContext::Init(const std::vector<const char*>& windowExtensions) {
-    // 1. 准备扩展列表 (融合窗口扩展 + 苹果专属扩展)
     std::vector<const char*> extensions = windowExtensions;
 
 #ifdef __APPLE__
+    // Inject Apple Portability Extension for macOS compatibility (MoltenVK).
+    // 注入 Apple Portability 扩展以兼容 macOS (MoltenVK)。
     extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
     HR_LOG_INFO("VulkanContext: Injected Apple Portability Extension.");
 #endif
 
-    // 【Vulkan 教学】：显式 API (Explicit API) 的哲学
-    // Vulkan 不做任何假设。你需要用结构体 (Struct) 把所有细节填好递交给它。
-    // 所有 Vulkan 结构体都必须设置 sType (Structure Type)，这是为了驱动在解析内存时不会读错。
-    
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "Hybrid Renderer";
@@ -74,7 +85,8 @@ bool VulkanContext::Init(const std::vector<const char*>& windowExtensions) {
     createInfo.ppEnabledExtensionNames = extensions.data();
 
 #ifdef __APPLE__
-    // 告诉驱动：我们要包含那些非原生（转译）的 Vulkan 设备（即 MoltenVK）
+    // Enable enumeration of non-conformant physical devices required by macOS.
+    // 允许枚举 macOS 环境下的非原生（转译）物理设备。
     createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
@@ -88,11 +100,6 @@ bool VulkanContext::Init(const std::vector<const char*>& windowExtensions) {
 }
 
 void VulkanContext::PickPhysicalDevice() {
-    // 【Vulkan 教学】：获取列表的“两步走”模式
-    // 在 Vulkan 中获取数组数据，标准做法总是分两步：
-    // 第一步：传入 nullptr，让 Vulkan 告诉你数组有多大（数量）。
-    // 第二步：分配好内存后，再调一次函数，真正把数据填进来。
-    
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
 
@@ -104,11 +111,10 @@ void VulkanContext::PickPhysicalDevice() {
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
 
-    // 简单起见，我们直接挑选第一个设备 (对于 Mac 通常就是 M 系列芯片)
-    // 在后续的工业级开发中，我们会给显卡打分（比如独立显卡加分，支持几何着色器加分）来挑选。
+    // Select the first available physical device.
+    // 选取首个可用的物理设备。
     m_PhysicalDevice = devices[0];
 
-    // 查询并打印显卡属性
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(m_PhysicalDevice, &deviceProperties);
     
@@ -118,21 +124,21 @@ void VulkanContext::PickPhysicalDevice() {
 QueueFamilyIndices VulkanContext::FindQueueFamilies(VkPhysicalDevice device) {
     QueueFamilyIndices indices;
 
-    // 获取当前显卡支持的所有队列族（车间）
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
-    // 遍历这些车间，寻找我们需要的能力
     int i = 0;
     for (const auto& queueFamily : queueFamilies) {
-        // 寻找一个支持图形绘制 (Graphics) 的车间
+        // Find a queue family that supports graphics operations.
+        // 寻找支持图形绘制操作的队列族。
         if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             indices.graphicsFamily = i;
         }
 
-        // 查询该车间是否支持向我们提供的 Surface 输出画面
+        // Check for presentation support to the window surface.
+        // 检查该队列族是否支持向当前窗口表面输出呈现画面。
         VkBool32 presentSupport = false;
         vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_Surface, &presentSupport);
         if (presentSupport) {
@@ -147,19 +153,13 @@ QueueFamilyIndices VulkanContext::FindQueueFamilies(VkPhysicalDevice device) {
 }
 
 void VulkanContext::CreateLogicalDevice() {
-    // 1. 查找我们需要使用的队列族
     QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
-    // if (!indices.IsComplete()) {
-    //     HR_LOG_ERROR("VulkanContext: Failed to find suitable queue families!");
-    //     return;
-    // }
 
-    // 【架构升级】：使用 std::set 自动去重。
-    // 如果画图和显示是同一个车间，set 里就只有 1 个元素；如果是不同的车间，就有 2 个元素。
+    // Use std::set to uniquely identify required queue families.
+    // 使用 std::set 自动去重，处理图形队列与呈现队列为同一个队列族的情况。
     std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
     std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 
-    // 2. 填写队列创建信息
     float queuePriority = 1.0f;
     for (uint32_t queueFamily : uniqueQueueFamilies) {
         VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -176,7 +176,8 @@ void VulkanContext::CreateLogicalDevice() {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
 #ifdef __APPLE__
-    // Mac 的 MoltenVK 通常需要开启子集兼容扩展
+    // Required extension for MoltenVK compatibility.
+    // MoltenVK 兼容性要求的必备子集扩展。
     deviceExtensions.push_back("VK_KHR_portability_subset");
 #endif
 
@@ -185,8 +186,6 @@ void VulkanContext::CreateLogicalDevice() {
     createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
-    
-    // 启用扩展！
     createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
@@ -203,25 +202,25 @@ void VulkanContext::CreateLogicalDevice() {
     HR_LOG_INFO("VulkanContext: Present Queue retrieved.");
 }
 
-
 void VulkanContext::CreateSwapchain(uint32_t width, uint32_t height) {
-    // 1. 设置画面的基本属性：大小、颜色格式（我们使用标准的 8位 SRGB 颜色空间）
     VkSwapchainCreateInfoKHR createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.surface = m_Surface;
 
-    // 为了避免过于复杂的底层查询，我们针对 Mac / 通用 PC 写死几个最常用的标准值
-    createInfo.minImageCount = 3; // 开启三缓冲 (Triple Buffering)，大幅提升帧率稳定性
+    // Standardize to triple buffering for improved framerate stability.
+    // 标准化使用三缓冲以提升帧率稳定性。
+    createInfo.minImageCount = 3; 
     createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB; 
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     createInfo.imageExtent = { width, height };
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // 我们要把它当作颜色渲染目标
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; 
 
     QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
     uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
 
-    // 如果画图和显示不是同一个车间，我们需要让图片在车间之间共享
+    // Configure image sharing mode depending on queue family uniqueness.
+    // 根据队列族是否独立，配置交换链图像的共享模式。
     if (indices.graphicsFamily != indices.presentFamily) {
         createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         createInfo.queueFamilyIndexCount = 2;
@@ -230,10 +229,10 @@ void VulkanContext::CreateSwapchain(uint32_t width, uint32_t height) {
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     }
 
-    createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR; // 不做任何画面翻转（如手机屏幕旋转）
-    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;   // 忽略 Alpha 通道，不与操作系统窗口混合
-    createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;               // FIFO = 开启垂直同步(V-Sync)，Mac 下兼容性最好
-    createInfo.clipped = VK_TRUE; // 被其他窗口挡住的像素不渲染
+    createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR; 
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;   
+    createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;               
+    createInfo.clipped = VK_TRUE; 
 
     if (vkCreateSwapchainKHR(m_Device, &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to create Swapchain!");
@@ -241,11 +240,11 @@ void VulkanContext::CreateSwapchain(uint32_t width, uint32_t height) {
     }
     HR_LOG_INFO("VulkanContext: Swapchain (Triple Buffering) created successfully.");
 
-    // 【新增】保存格式和分辨率，后续非常重要
     m_SwapchainImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
     m_SwapchainExtent = { width, height };
 
-    // 【新增】把显卡在 Swapchain 里自动帮我们建好的图片 (VkImage) 拿出来
+    // Retrieve the image handles created by the swapchain.
+    // 提取交换链自动创建的底层图像句柄。
     uint32_t imageCount;
     vkGetSwapchainImagesKHR(m_Device, m_Swapchain, &imageCount, nullptr);
     m_SwapchainImages.resize(imageCount);
@@ -259,16 +258,14 @@ void VulkanContext::CreateImageViews() {
         VkImageViewCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         createInfo.image = m_SwapchainImages[i];
-        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;     // 明确告诉它是 2D 图像
-        createInfo.format = m_SwapchainImageFormat;      // 保持和 Swapchain 相同的颜色格式
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;     
+        createInfo.format = m_SwapchainImageFormat;      
 
-        // 颜色通道映射（通常保持默认的 1:1 映射即可）
         createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
         createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
         createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
         createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 
-        // 描述图像的用途：它是颜色图，没有 Mipmap，只有 1 层
         createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         createInfo.subresourceRange.baseMipLevel = 0;
         createInfo.subresourceRange.levelCount = 1;
@@ -284,32 +281,34 @@ void VulkanContext::CreateImageViews() {
 }
 
 void VulkanContext::CreateRenderPass() {
-    // 1. 颜色附件 (Attachment) 描述：我们要画的这块画布有什么特性？
+    // Color attachment description.
+    // 颜色附件描述。
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = m_SwapchainImageFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // 无多重采样抗锯齿 (MSAA)
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; 
     
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   // 关键：渲染前，清空这块内存的内容
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // 关键：渲染后，保留内容以便显示到屏幕上
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; 
     
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // 我们目前不用模板测试
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; 
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      // 渲染前，我们不在乎图像原本是什么排布
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  // 渲染后，必须转换成能被屏幕显示的排布格式
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  
 
-    // 2. 颜色附件引用：给具体的 Subpass 用的
+    // Attachment reference for subpass usage.
+    // 供子通道调用的附件引用。
     VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0; // 对应上面 colorAttachment 的索引
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 渲染时，让显卡将其优化为颜色写入模式
+    colorAttachmentRef.attachment = 0; 
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; 
 
-    // 3. 子通道 (Subpass) 描述
+    // Subpass description.
+    // 子通道描述。
     VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; // 这是一条图形管线，不是 Compute 管线
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; 
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
 
-    // 4. 正式创建 Render Pass
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderPassInfo.attachmentCount = 1;
@@ -325,8 +324,6 @@ void VulkanContext::CreateRenderPass() {
 }
 
 void VulkanContext::CreateGraphicsPipeline() {
-    // 1. 读取我们离线编译好的 Shader 二进制代码
-    // 注意路径：因为我们在 build 目录下运行 ./bin/HybridRenderer，所以相对路径包含 bin/
     auto vertShaderCode = ReadFile("bin/shaders/shader.vert.spv");
     auto fragShaderCode = ReadFile("bin/shaders/shader.frag.spv");
 
@@ -335,18 +332,15 @@ void VulkanContext::CreateGraphicsPipeline() {
         return;
     }
 
-    // 2. 将二进制代码封装成 Vulkan 模块
     VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
 
-    // 3. 配置顶点着色器阶段
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStageInfo.module = vertShaderModule;
-    vertShaderStageInfo.pName = "main"; // 入口函数名
+    vertShaderStageInfo.pName = "main"; 
 
-    // 4. 配置片段着色器阶段
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -355,21 +349,21 @@ void VulkanContext::CreateGraphicsPipeline() {
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
-    // 5. 顶点输入状态 (Vertex Input)
-    // 目前我们把顶点数据硬编码在 Shader 里了，所以这里暂时为空
+    auto bindingDescription = Vertex::GetBindingDescription();
+    auto attributeDescriptions = Vertex::GetAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;
-    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
-    // 6. 拓扑图元装配 (Input Assembly)
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // 每三个点画一个三角形
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; 
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    // 7. 动态状态 (Dynamic State)
-    // 允许我们在录制绘制命令时动态修改视口和裁剪矩形，而不用重新创建整个管线
     std::vector<VkDynamicState> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -379,33 +373,33 @@ void VulkanContext::CreateGraphicsPipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
-    // 视口与裁剪矩形状态配置
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1; // 虽然是动态的，但仍需告诉 Vulkan 我们用几个视口
+    viewportState.viewportCount = 1; 
     viewportState.scissorCount = 1;
 
-    // 8. 光栅化器 (Rasterizer) - 图形学核心
+    // Rasterization state configuration.
+    // 光栅化器状态配置。
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL; // 填充多边形（也可设为 LINE 用于线框模式）
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL; 
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;   // 背面剔除
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // 顺时针为正面
+    // Disable backface culling to render both sides of the 2D plane.
+    // 关闭背面剔除，渲染平面的正反两面。
+    rasterizer.cullMode = VK_CULL_MODE_NONE; 
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; 
     rasterizer.depthBiasEnable = VK_FALSE;
 
-    // 9. 多重采样 (Multisampling) - 暂不开启抗锯齿
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    // 10. 颜色混合 (Color Blending) - 决定新像素如何覆盖画板上的老像素
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE; // 暂时关闭混合 (Alpha Blend)
+    colorBlendAttachment.blendEnable = VK_FALSE; 
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -413,20 +407,16 @@ void VulkanContext::CreateGraphicsPipeline() {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
 
-    // 11. 管线布局 (Pipeline Layout) - 用于后续传递 Uniform Buffer (比如 MVP 矩阵)
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &m_DescriptorSetLayout;
 
     if (vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to create pipeline layout!");
         return;
     }
 
-    // ==========================================
-    // 最终组装装配线 (Create Graphics Pipeline)
-    // ==========================================
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;
@@ -439,7 +429,7 @@ void VulkanContext::CreateGraphicsPipeline() {
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = m_PipelineLayout;
-    pipelineInfo.renderPass = m_RenderPass; // 必须绑定对应的 Render Pass
+    pipelineInfo.renderPass = m_RenderPass; 
     pipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline) != VK_SUCCESS) {
@@ -448,16 +438,451 @@ void VulkanContext::CreateGraphicsPipeline() {
     }
     HR_LOG_INFO("VulkanContext: Graphics Pipeline created successfully.");
 
-    // Shader Module 只是在创建管线时需要，烤死进管线后就可以立刻销毁了
     vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
     vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
 }
 
+uint32_t VulkanContext::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+    VkPhysicalDeviceMemoryProperties memProperties;
+    vkGetPhysicalDeviceMemoryProperties(m_PhysicalDevice, &memProperties);
+
+    // Locate memory type that satisfies the requested properties via bitmask.
+    // 通过位掩码寻找满足属性要求的物理内存类型索引。
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i; 
+        }
+    }
+
+    HR_LOG_ERROR("VulkanContext: Failed to find suitable memory type!");
+    return 0; 
+}
+
+void VulkanContext::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage; 
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(m_Device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create buffer!");
+        return;
+    }
+
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(m_Device, buffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
+
+    if (vkAllocateMemory(m_Device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to allocate buffer memory!");
+        return;
+    }
+
+    vkBindBufferMemory(m_Device, buffer, bufferMemory, 0);
+}
+
+void VulkanContext::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_CommandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(m_Device, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; 
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = size;
+    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+    vkEndCommandBuffer(commandBuffer);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_GraphicsQueue);
+
+    vkFreeCommandBuffers(m_Device, m_CommandPool, 1, &commandBuffer);
+}
+
+void VulkanContext::CreateFramebuffers() {
+    m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size());
+
+    for (size_t i = 0; i < m_SwapchainImageViews.size(); i++) {
+        VkImageView attachments[] = {
+            m_SwapchainImageViews[i]
+        };
+
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = m_RenderPass; 
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = attachments;
+        framebufferInfo.width = m_SwapchainExtent.width;
+        framebufferInfo.height = m_SwapchainExtent.height;
+        framebufferInfo.layers = 1;
+
+        if (vkCreateFramebuffer(m_Device, &framebufferInfo, nullptr, &m_SwapchainFramebuffers[i]) != VK_SUCCESS) {
+            HR_LOG_ERROR("VulkanContext: Failed to create framebuffer!");
+            return;
+        }
+    }
+    HR_LOG_INFO("VulkanContext: Framebuffers created.");
+}
+
+void VulkanContext::CreateVertexBuffer() {
+    VkDeviceSize bufferSize = sizeof(VERTICES[0]) * VERTICES.size();
+
+    // Create a host-visible staging buffer.
+    // 创建主机可见的暂存缓冲。
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+                 stagingBuffer, stagingBufferMemory);
+
+    void* data;
+    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); 
+    memcpy(data, VERTICES.data(), (size_t)bufferSize);                  
+    vkUnmapMemory(m_Device, stagingBufferMemory);                        
+
+    // Create a device-local vertex buffer.
+    // 创建设备本地的高速顶点缓冲。
+    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+                 m_VertexBuffer, m_VertexBufferMemory);
+
+    // Transfer data from staging to VRAM.
+    // 通过直接内存访问 (DMA) 将数据移入显存。
+    CopyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
+
+    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+
+    HR_LOG_INFO("VulkanContext: Vertex Buffer created and loaded into VRAM.");
+}
+
+void VulkanContext::CreateIndexBuffer() {
+    VkDeviceSize bufferSize = sizeof(INDICES[0]) * INDICES.size();
+
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+                 stagingBuffer, stagingBufferMemory);
+
+    void* data;
+    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, INDICES.data(), (size_t)bufferSize);
+    vkUnmapMemory(m_Device, stagingBufferMemory);
+
+    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+                 m_IndexBuffer, m_IndexBufferMemory);
+
+    CopyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
+
+    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+
+    HR_LOG_INFO("VulkanContext: Index Buffer created and loaded into VRAM.");
+}
+
+void VulkanContext::CreateDescriptorSetLayout() {
+    VkDescriptorSetLayoutBinding uboLayoutBinding{};
+    uboLayoutBinding.binding = 0;
+    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboLayoutBinding.descriptorCount = 1;
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; 
+    uboLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &uboLayoutBinding;
+
+    if (vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create descriptor set layout!");
+    }
+}
+
+void VulkanContext::CreateUniformBuffers() {
+    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+    size_t imageCount = m_SwapchainImages.size();
+
+    m_UniformBuffers.resize(imageCount);
+    m_UniformBuffersMemory.resize(imageCount);
+    m_UniformBuffersMapped.resize(imageCount);
+
+    for (size_t i = 0; i < imageCount; i++) {
+        CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, 
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+                     m_UniformBuffers[i], m_UniformBuffersMemory[i]);
+
+        // Maintain a persistent pointer to the memory for per-frame data updates.
+        // 维持一个持久的内存映射指针，用于逐帧更新数据，避免频繁开销。
+        vkMapMemory(m_Device, m_UniformBuffersMemory[i], 0, bufferSize, 0, &m_UniformBuffersMapped[i]);
+    }
+}
+
+void VulkanContext::UpdateUniformBuffer(uint32_t currentImage) {
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    UniformBufferObject ubo{};
+    
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f), m_SwapchainExtent.width / (float) m_SwapchainExtent.height, 0.1f, 10.0f);
+    
+    // Vulkan uses a downward-pointing Y axis, unlike OpenGL. Negate the Y scaling factor.
+    // Vulkan 的 Y 轴朝下（与 OpenGL 相反），对投影矩阵的 Y 轴缩放因子取反以校正画面。
+    ubo.proj[1][1] *= -1;
+
+    memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+}
+
+void VulkanContext::CreateDescriptorPool() {
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size());
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = static_cast<uint32_t>(m_SwapchainImages.size());
+
+    if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create descriptor pool!");
+    }
+}
+
+void VulkanContext::CreateDescriptorSets() {
+    std::vector<VkDescriptorSetLayout> layouts(m_SwapchainImages.size(), m_DescriptorSetLayout);
+    
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_DescriptorPool;
+    allocInfo.descriptorSetCount = static_cast<uint32_t>(m_SwapchainImages.size());
+    allocInfo.pSetLayouts = layouts.data();
+
+    m_DescriptorSets.resize(m_SwapchainImages.size());
+    if (vkAllocateDescriptorSets(m_Device, &allocInfo, m_DescriptorSets.data()) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to allocate descriptor sets!");
+    }
+
+    for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = m_UniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = m_DescriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(m_Device, 1, &descriptorWrite, 0, nullptr);
+    }
+    HR_LOG_INFO("VulkanContext: Descriptor Sets configured.");
+}
+
+void VulkanContext::CreateCommandPool() {
+    QueueFamilyIndices queueFamilyIndices = FindQueueFamilies(m_PhysicalDevice);
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; 
+    poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+    if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create command pool!");
+        return;
+    }
+}
+
+void VulkanContext::CreateCommandBuffer() {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_CommandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; 
+    allocInfo.commandBufferCount = 1;
+
+    if (vkAllocateCommandBuffers(m_Device, &allocInfo, &m_CommandBuffer) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to allocate command buffers!");
+        return;
+    }
+    HR_LOG_INFO("VulkanContext: Command Pool and Buffer allocated.");
+}
+
+void VulkanContext::CreateSyncObjects() {
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    // Initialize fence in a signaled state to avoid blocking execution on the first frame.
+    // 初始状态设定为已触发，防止 CPU 在渲染第一帧时陷入死锁等待。
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    if (vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_ImageAvailableSemaphore) != VK_SUCCESS ||
+        vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphore) != VK_SUCCESS ||
+        vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFence) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create synchronization objects!");
+        return;
+    }
+    HR_LOG_INFO("VulkanContext: Synchronization objects created.");
+}
+
+void VulkanContext::DrawFrame() {
+    // Wait for the previous frame to finish GPU execution.
+    // 等待上一帧的 GPU 渲染执行完毕。
+    vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(m_Device, 1, &m_InFlightFence);
+
+    uint32_t imageIndex;
+    vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+    
+    UpdateUniformBuffer(imageIndex);
+    
+    vkResetCommandBuffer(m_CommandBuffer, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    vkBeginCommandBuffer(m_CommandBuffer, &beginInfo);
+
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = m_RenderPass;
+    renderPassInfo.framebuffer = m_SwapchainFramebuffers[imageIndex]; 
+    renderPassInfo.renderArea.offset = {0, 0};
+    renderPassInfo.renderArea.extent = m_SwapchainExtent;
+
+    VkClearValue clearColor = {{{0.05f, 0.05f, 0.05f, 1.0f}}};
+    renderPassInfo.clearValueCount = 1;
+    renderPassInfo.pClearValues = &clearColor;
+
+    vkCmdBeginRenderPass(m_CommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
+
+    VkBuffer vertexBuffers[] = {m_VertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
+
+    vkCmdBindIndexBuffer(m_CommandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+    vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[imageIndex], 0, nullptr);
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<float>(m_SwapchainExtent.width);
+    viewport.height = static_cast<float>(m_SwapchainExtent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(m_CommandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = m_SwapchainExtent;
+    vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
+
+    vkCmdDrawIndexed(m_CommandBuffer, static_cast<uint32_t>(INDICES.size()), 1, 0, 0, 0);
+
+    vkCmdEndRenderPass(m_CommandBuffer);
+    if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to record command buffer!");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+    VkSemaphore waitSemaphores[] = {m_ImageAvailableSemaphore};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = waitSemaphores;
+    submitInfo.pWaitDstStageMask = waitStages;
+
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &m_CommandBuffer;
+
+    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphore};
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = signalSemaphores;
+
+    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFence) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to submit draw command buffer!");
+    }
+
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = signalSemaphores; 
+    
+    VkSwapchainKHR swapchains[] = {m_Swapchain};
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = swapchains;
+    presentInfo.pImageIndices = &imageIndex;
+
+    vkQueuePresentKHR(m_PresentQueue, &presentInfo);
+}
+
 void VulkanContext::Cleanup() {
-    // 【C++ 架构规范】：安全的资源销毁
-    // 销毁顺序必须与创建顺序严格相反。
-    // 注意：VkPhysicalDevice 是物理客观存在的显卡，不需要我们去 Destroy，
-    // 我们只需要销毁我们在内存中创建的逻辑对象 (m_Instance)。
+    // Await GPU idle state before resource destruction to prevent memory access violations.
+    // 强制挂起 CPU，等待 GPU 队列全部执行完毕，防止析构时发生显存越界访问。
+    if (m_Device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_Device); 
+    }
+
+    if (m_ImageAvailableSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(m_Device, m_ImageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(m_Device, m_RenderFinishedSemaphore, nullptr);
+        vkDestroyFence(m_Device, m_InFlightFence, nullptr);
+        HR_LOG_INFO("VulkanContext: Sync objects destroyed.");
+    }
+
+    if (m_VertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
+        vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr);
+        HR_LOG_INFO("VulkanContext: Vertex Buffer destroyed.");
+    }
+
+    if (m_IndexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
+        vkFreeMemory(m_Device, m_IndexBufferMemory, nullptr);
+        HR_LOG_INFO("VulkanContext: Index Buffer destroyed.");
+    }
+
+    if (m_CommandPool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
+        HR_LOG_INFO("VulkanContext: Command Pool destroyed.");
+    }
+    for (auto framebuffer : m_SwapchainFramebuffers) {
+        vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+    }
+        HR_LOG_INFO("VulkanContext: Framebuffers destroyed.");
 
     if (m_GraphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
@@ -466,6 +891,18 @@ void VulkanContext::Cleanup() {
     if (m_PipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
     }
+
+    if (m_DescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+    }
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+    }
+    for (size_t i = 0; i < m_UniformBuffers.size(); i++) {
+        vkDestroyBuffer(m_Device, m_UniformBuffers[i], nullptr);
+        vkFreeMemory(m_Device, m_UniformBuffersMemory[i], nullptr);
+    }
+        HR_LOG_INFO("VulkanContext: Uniform Buffers destroyed.");
 
     if (m_RenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
@@ -488,13 +925,13 @@ void VulkanContext::Cleanup() {
     }
 
     if (m_Surface != VK_NULL_HANDLE) {
-        vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr); // Surface 由 Instance 销毁
+        vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr); 
         HR_LOG_INFO("VulkanContext: Surface destroyed.");
     }
 
     if (m_Instance != VK_NULL_HANDLE) {
         vkDestroyInstance(m_Instance, nullptr);
-        m_Instance = VK_NULL_HANDLE; // 销毁后置空，防止野指针悬挂
+        m_Instance = VK_NULL_HANDLE; 
         HR_LOG_INFO("VulkanContext: Vulkan Instance destroyed.");
     }
 }

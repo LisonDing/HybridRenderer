@@ -13,6 +13,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 find_package(Vulkan REQUIRED)
 
 include(FetchContent)
+# 2. 自动下载并配置 GLFW (跨平台窗口和输入库)
 FetchContent_Declare(
     glfw
     GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -23,14 +24,36 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(glfw)
 
+# 3. 自动下载并配置 GLM (只有头文件，无需编译，极速)
+FetchContent_Declare(
+    glm
+    GIT_REPOSITORY https://github.com/g-truc/glm.git
+    GIT_TAG 1.0.1
+)
+FetchContent_MakeAvailable(glm)
+
+# 4. 自动下载并配置 stb_image (单头文件库，用于加载图片)
+set(STB_IMAGE_DIR "${CMAKE_SOURCE_DIR}/external/stb")
+set(STB_IMAGE_FILE "${STB_IMAGE_DIR}/stb_image.h")
+
+if(NOT EXISTS ${STB_IMAGE_FILE})
+    file(MAKE_DIRECTORY ${STB_IMAGE_DIR})
+    message(STATUS "Downloading stb_image.h from GitHub...")
+    file(DOWNLOAD 
+        "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h" 
+        ${STB_IMAGE_FILE}
+        SHOW_PROGRESS
+    )
+endif()
+
 # ==========================================
 # 核心引擎构建 (Target Creation) - 移到前面！
 # ==========================================
 file(GLOB_RECURSE SRC_FILES "src/*.cpp" "src/*.h")
 add_executable(HybridRenderer ${SRC_FILES})
 
-target_include_directories(HybridRenderer PRIVATE src)
-target_link_libraries(HybridRenderer PRIVATE Vulkan::Vulkan glfw)
+target_include_directories(HybridRenderer PRIVATE src ${STB_IMAGE_DIR})
+target_link_libraries(HybridRenderer PRIVATE Vulkan::Vulkan glfw glm::glm)
 
 if (APPLE)
     target_link_libraries(HybridRenderer PRIVATE "-framework Cocoa" "-framework IOKit" "-framework CoreFoundation")
