@@ -53,6 +53,9 @@ int main() {
     vkContext.CreateImageViews();
     vkContext.CreateRenderPass();
 
+
+    vkContext.CreateGraphicsPipeline();
+    
     // 引擎主循环
     HR_LOG_INFO("Entering Main Loop...");
     while (!glfwWindowShouldClose(window)) {

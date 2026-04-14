@@ -56,6 +56,9 @@ public:
     // 创建渲染通道（画布）
     void CreateRenderPass();
 
+    // 创建图形管线（画笔和绘画流程）
+    void CreateGraphicsPipeline();
+
     // 清理资源
     void Cleanup();
 
@@ -90,6 +93,9 @@ private:
     std::vector<VkImageView> m_SwapchainImageViews; // 我们为其创建的观察镜头
 
     VkRenderPass     m_RenderPass     = VK_NULL_HANDLE; // 渲染通道
+
+    VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE; // 管线布局 (用于传递全局变量，如 MVP 矩阵)
+    VkPipeline       m_GraphicsPipeline = VK_NULL_HANDLE; // 最终的图形管线实体
 
     // 静态辅助函数：将二进制文件读取为字节数组
     static std::vector<char> ReadFile(const std::string& filename);

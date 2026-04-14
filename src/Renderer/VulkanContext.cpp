@@ -324,11 +324,148 @@ void VulkanContext::CreateRenderPass() {
     HR_LOG_INFO("VulkanContext: Render Pass created.");
 }
 
+void VulkanContext::CreateGraphicsPipeline() {
+    // 1. 读取我们离线编译好的 Shader 二进制代码
+    // 注意路径：因为我们在 build 目录下运行 ./bin/HybridRenderer，所以相对路径包含 bin/
+    auto vertShaderCode = ReadFile("bin/shaders/shader.vert.spv");
+    auto fragShaderCode = ReadFile("bin/shaders/shader.frag.spv");
+
+    if (vertShaderCode.empty() || fragShaderCode.empty()) {
+        HR_LOG_ERROR("VulkanContext: Failed to load shader files! Check your paths.");
+        return;
+    }
+
+    // 2. 将二进制代码封装成 Vulkan 模块
+    VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
+    VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+
+    // 3. 配置顶点着色器阶段
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main"; // 入口函数名
+
+    // 4. 配置片段着色器阶段
+    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStageInfo.module = fragShaderModule;
+    fragShaderStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+
+    // 5. 顶点输入状态 (Vertex Input)
+    // 目前我们把顶点数据硬编码在 Shader 里了，所以这里暂时为空
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 0;
+    vertexInputInfo.vertexAttributeDescriptionCount = 0;
+
+    // 6. 拓扑图元装配 (Input Assembly)
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // 每三个点画一个三角形
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    // 7. 动态状态 (Dynamic State)
+    // 允许我们在录制绘制命令时动态修改视口和裁剪矩形，而不用重新创建整个管线
+    std::vector<VkDynamicState> dynamicStates = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR
+    };
+    VkPipelineDynamicStateCreateInfo dynamicState{};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
+
+    // 视口与裁剪矩形状态配置
+    VkPipelineViewportStateCreateInfo viewportState{};
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.viewportCount = 1; // 虽然是动态的，但仍需告诉 Vulkan 我们用几个视口
+    viewportState.scissorCount = 1;
+
+    // 8. 光栅化器 (Rasterizer) - 图形学核心
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL; // 填充多边形（也可设为 LINE 用于线框模式）
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;   // 背面剔除
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // 顺时针为正面
+    rasterizer.depthBiasEnable = VK_FALSE;
+
+    // 9. 多重采样 (Multisampling) - 暂不开启抗锯齿
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.sampleShadingEnable = VK_FALSE;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    // 10. 颜色混合 (Color Blending) - 决定新像素如何覆盖画板上的老像素
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable = VK_FALSE; // 暂时关闭混合 (Alpha Blend)
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{};
+    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlending.logicOpEnable = VK_FALSE;
+    colorBlending.attachmentCount = 1;
+    colorBlending.pAttachments = &colorBlendAttachment;
+
+    // 11. 管线布局 (Pipeline Layout) - 用于后续传递 Uniform Buffer (比如 MVP 矩阵)
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 0;
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+
+    if (vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create pipeline layout!");
+        return;
+    }
+
+    // ==========================================
+    // 最终组装装配线 (Create Graphics Pipeline)
+    // ==========================================
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = m_PipelineLayout;
+    pipelineInfo.renderPass = m_RenderPass; // 必须绑定对应的 Render Pass
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create graphics pipeline!");
+        return;
+    }
+    HR_LOG_INFO("VulkanContext: Graphics Pipeline created successfully.");
+
+    // Shader Module 只是在创建管线时需要，烤死进管线后就可以立刻销毁了
+    vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
+}
+
 void VulkanContext::Cleanup() {
     // 【C++ 架构规范】：安全的资源销毁
     // 销毁顺序必须与创建顺序严格相反。
     // 注意：VkPhysicalDevice 是物理客观存在的显卡，不需要我们去 Destroy，
     // 我们只需要销毁我们在内存中创建的逻辑对象 (m_Instance)。
+
+    if (m_GraphicsPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
+        HR_LOG_INFO("VulkanContext: Graphics Pipeline destroyed.");
+    }
+    if (m_PipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
+    }
 
     if (m_RenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
