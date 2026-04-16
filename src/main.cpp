@@ -37,6 +37,7 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
     // Only track movement if a button is held down.
     if (isLeftPressed || isRightPressed) {
         if (!isDragging) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Hide cursor during drag
             lastX = xpos;
             lastY = ypos;
             isDragging = true;
@@ -53,6 +54,9 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
             camera.ProcessOrbit(xoffset, yoffset); // 左键：环绕
         } else if (isRightPressed) {
             camera.ProcessPan(xoffset, yoffset);   // 右键：平移
+        }
+        if (isDragging) {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Hide cursor during drag
         }
     } else {
         isDragging = false;
