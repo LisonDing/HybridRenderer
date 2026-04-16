@@ -731,6 +731,10 @@ void VulkanContext::LoadModel() {
 
     std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
+    // 新增：用于记录模型的物理边界
+    glm::vec3 minBounds(FLT_MAX);
+    glm::vec3 maxBounds(-FLT_MAX);
+
     for (const auto& shape : shapes) {
         for (const auto& index : shape.mesh.indices) {
             Vertex vertex{};
@@ -740,6 +744,10 @@ void VulkanContext::LoadModel() {
                 attrib.vertices[3 * index.vertex_index + 1],
                 attrib.vertices[3 * index.vertex_index + 2]
             };
+
+            // 记录边界
+            minBounds = glm::min(minBounds, vertex.pos);
+            maxBounds = glm::max(maxBounds, vertex.pos);
 
             // Read UVs if they exist, obj files flip Y-axis for textures natively.
             // 读取 UV 坐标（若存在）。OBJ 文件的 V 轴底层坐标系往往需要翻转 (1.0 - v)。
@@ -762,7 +770,19 @@ void VulkanContext::LoadModel() {
             m_Indices.push_back(uniqueVertices[vertex]);
         }
     }
-    
+    // =======================================================
+    // 核心修复：归一化模型空间 (Model Space Normalization)
+    // 强行把模型的几何中心对齐到世界原点 (0,0,0)，并缩放到统一大小
+    // =======================================================
+    glm::vec3 center = (minBounds + maxBounds) / 2.0f;
+    glm::vec3 extents = maxBounds - minBounds;
+    // 取最长的一边作为缩放基准，确保模型不会过大撑爆屏幕
+    float maxDim = std::max(extents.x, std::max(extents.y, extents.z));
+
+    for (auto& v : m_Vertices) {
+        // 先居中，再缩放 (缩放比例你可以根据需要微调，这里缩放到直径为 2.0 的空间)
+        v.pos = (v.pos - center) / maxDim * 2.0f;
+    }
     HR_LOG_INFO("VulkanContext: Model loaded. Vertices: " + std::to_string(m_Vertices.size()) + " Indices: " + std::to_string(m_Indices.size()));
 }
 

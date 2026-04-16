@@ -18,6 +18,11 @@ float lastX = WIDTH / 2.0f;
 float lastY = HEIGHT / 2.0f;
 bool isDragging = false; // 记录鼠标是否在拖拽
 
+// 【新增】用于在拖拽结束后把鼠标完美放回原位的锚点
+static double clickAnchorX = WIDTH / 2.0;
+static double clickAnchorY = HEIGHT / 2.0;
+static bool ignoreFirstDelta = false;
+
 // Timing mechanisms to ensure smooth movement regardless of framerate.
 // 时间机制，确保不同帧率下的移动速度恒定。
 float deltaTime = 0.0f;
@@ -31,59 +36,72 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
 
     // Get current mouse button states.
     // 获取当前鼠标左右键的状态。
-    bool isLeftPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-    bool isRightPressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    // 【Blender 逻辑】只侦听鼠标中键 (Middle Mouse Button)
+    bool isMiddlePressed = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
+    
+    // 侦听 Shift 键状态 (左右 Shift 皆可)
+    bool isShiftPressed = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || 
+                          glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
 
     // Only track movement if a button is held down.
-    if (isLeftPressed || isRightPressed) {
+    if (isMiddlePressed) {
         if (!isDragging) {
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // Hide cursor during drag
+            // 记录点击瞬间的锚点
+            glfwGetCursorPos(window, &clickAnchorX, &clickAnchorY);
+            
+            // 使用隐藏模式，突破屏幕物理边缘限制
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+            
+            isDragging = true;
+            ignoreFirstDelta = true; 
+            return;
+        }
+
+        if (ignoreFirstDelta) {
             lastX = xpos;
             lastY = ypos;
-            isDragging = true;
+            ignoreFirstDelta = false;
+            return;
         }
 
         float xoffset = xpos - lastX;
-        float yoffset = ypos - lastY;
+        float yoffset = ypos - lastY; 
         lastX = xpos;
         lastY = ypos;
 
-        // Dispatch to corresponding camera behaviors.
-        // 根据按键状态分发至不同的摄像机行为。
-        if (isLeftPressed) {
-            camera.ProcessOrbit(xoffset, yoffset); // 左键：环绕
-        } else if (isRightPressed) {
-            camera.ProcessPan(xoffset, yoffset);   // 右键：平移
-        }
-        if (isDragging) {
-            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // Hide cursor during drag
+        // 【核心：Blender 无限屏幕环绕 (Continuous Grab)】
+        if (isShiftPressed) {
+                camera.ProcessPan(xoffset, yoffset);   // Shift + 中键：平移画布
+            } else {
+                camera.ProcessOrbit(xoffset, yoffset); // 中键：环绕物体 (Z轴向上的 Turntable)
         }
     } else {
-        isDragging = false;
+        if (isDragging) {
+            // 3. 拖拽结束：恢复可见模式
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            // 4. 瞬间将指针拉回一开始点击的原位，维持完美的交互错觉
+            glfwSetCursorPos(window, clickAnchorX, clickAnchorY);
+            isDragging = false;
+        }
     }
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-    camera.ProcessZoom(static_cast<float>(yoffset)); // 滚轮：推拉缩放
+    // 【Blender 逻辑】滚轮 = 以焦点为基准拉近/推远 (Zoom)
+    // 稍微调高一点灵敏度，让滚轮缩放更爽快
+    camera.ProcessZoom(static_cast<float>(yoffset), 0.8f); 
 }
 
 void processInput(GLFWwindow *window) {
-
-    // Critical : Emerqency exit on ESC key press, to prevent lockup during development.
-    // 关键：ESC 键紧急退出，防止开发过程中程序锁死
+    // ESC 退出
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // Hybrid FPS navigation using WASD keys, moving the camera and target together.
-    // 混合 FPS 导航，使用 WASD 键同时移动摄像机和目标点。
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera.ProcessKeyboard(Core::FORWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera.ProcessKeyboard(Core::BACKWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera.ProcessKeyboard(Core::LEFT, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera.ProcessKeyboard(Core::RIGHT, deltaTime);
+    // 【Blender 快捷键：小键盘 1/3/7 切换正交视图，或者 Home 键全局居中】
+    // 这里保留一个快捷键 F：一键将焦点归零，相当于 Blender 的 Numpad '.' (View Selected)
+    if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS) {
+        camera.ResetFocus(glm::vec3(0.0f, 0.0f, 0.0f));
+    }
 }
 
 int main() {
