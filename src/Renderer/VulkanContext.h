@@ -1,5 +1,6 @@
 #pragma once
 
+#include "glm/fwd.hpp"
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <optional>
@@ -17,7 +18,7 @@ namespace Renderer {
 // Standard vertex structure aligning with shader inputs.
 // 标准顶点结构体，需与着色器输入布局严格对齐。
 struct Vertex {
-    glm::vec2 pos;
+    glm::vec3 pos;
     glm::vec3 color;
     glm::vec2 texCoord; // New: Texture Coordinates (UV) / 新增：纹理坐标 (UV)
 
@@ -36,7 +37,7 @@ struct Vertex {
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
         attributeDescriptions[1].binding = 0;
@@ -48,7 +49,7 @@ struct Vertex {
         // 纹理坐标属性，对应 location = 2。
         attributeDescriptions[2].binding = 0;
         attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
 
         return attributeDescriptions;
@@ -127,15 +128,18 @@ public:
     void CreateTextureImageView();
     void CreateTextureSampler();
 
+    // --- Depth Testing & Blending ---
+    void CreateDepthResources();
+
     // --- Execution ---
-    void DrawFrame(); 
+    void DrawFrame(const glm::mat4& view, const glm::mat4& proj); 
     void Cleanup();
 
 private:
     QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
-    void UpdateUniformBuffer(uint32_t currentImage);
+    void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj);
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
@@ -184,6 +188,14 @@ private:
     VkDeviceMemory m_VertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer       m_IndexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_IndexBufferMemory = VK_NULL_HANDLE;
+
+    // Depth Resources
+    // 深度测试资源
+    VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+    VkFormat FindDepthFormat();
+    VkImage        m_DepthImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_DepthImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_DepthImageView = VK_NULL_HANDLE;
 
     // Descriptor Sets
     // 描述符与统一缓冲资源

@@ -11,19 +11,50 @@
 
 namespace Renderer {
 
-// Define 4 independent vertices for a quad.
-// 定义一个矩形的 4 个独立顶点。
+// Define 24 vertices for a 3D cube to ensure proper UV mapping on all 6 faces.
+// 定义 3D 立方体的 24 个独立顶点，以确保 6 个面的 UV 贴图坐标都能正确映射。
 const std::vector<Vertex> VERTICES = {
-    {{-0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}, // Top-Left / 左上
-    {{ 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}}, // Top-Right / 右上
-    {{ 0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}, // Bottom-Right / 右下
-    {{-0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}  // Bottom-Left / 左下
+    // Front face / 正面
+    {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+    // Back face / 背面
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    // Top face / 顶面
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+    // Bottom face / 底面
+    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+    {{ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    // Right face / 右面
+    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+    {{ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    // Left face / 左面
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
+    {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
+    {{-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 };
 
-// Define index array to assemble 2 triangles from 4 vertices.
-// 定义索引数组，使用 4 个顶点组装出 2 个三角形。
+// Define 36 indices for the 12 triangles of the cube.
+// 定义 36 个索引，用于绘制立方体的 12 个三角形。
 const std::vector<uint16_t> INDICES = {
-    0, 1, 2, 2, 3, 0
+    0, 1, 2, 2, 3, 0,       // Front
+    4, 5, 6, 6, 7, 4,       // Back
+    8, 9, 10, 10, 11, 8,    // Top
+    12, 13, 14, 14, 15, 12, // Bottom
+    16, 17, 18, 18, 19, 16, // Right
+    20, 21, 22, 22, 23, 20  // Left
 };
 
 std::vector<char> VulkanContext::ReadFile(const std::string& filename) {
@@ -281,11 +312,27 @@ void VulkanContext::CreateRenderPass() {
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      
     colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  
 
+    // New: Depth attachment description.
+    // 新增：深度附件描述，用于每帧渲染前的深度清空操作。
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = FindDepthFormat();
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     // Attachment reference for subpass usage.
     // 供子通道调用的附件引用。
     VkAttachmentReference colorAttachmentRef{};
     colorAttachmentRef.attachment = 0; 
     colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; 
+
+    VkAttachmentReference depthAttachmentRef{};
+    depthAttachmentRef.attachment = 1; // Index 1 in the attachments array / 位于附件数组的索引 1
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     // Subpass description.
     // 子通道描述。
@@ -293,13 +340,17 @@ void VulkanContext::CreateRenderPass() {
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; 
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef; // Bind depth to subpass / 将深度附件绑定至子通道
+
+    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
 
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 1;
-    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+    renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
+    
 
     if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to create Render Pass!");
@@ -377,6 +428,16 @@ void VulkanContext::CreateGraphicsPipeline() {
     rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; 
     rasterizer.depthBiasEnable = VK_FALSE;
 
+    // Enable depth testing and writing to ensure correct 3D occlusion.
+    // 启用深度测试与深度写入，确保正确的 3D 物理遮挡关系。
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; // Fragments closer to camera (lower Z) overwrite existing.
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
@@ -413,6 +474,7 @@ void VulkanContext::CreateGraphicsPipeline() {
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.pDepthStencilState = &depthStencil; // Bind depth state to pipeline / 将深度状态绑定至管线
     pipelineInfo.layout = m_PipelineLayout;
     pipelineInfo.renderPass = m_RenderPass; 
     pipelineInfo.subpass = 0;
@@ -696,20 +758,78 @@ void VulkanContext::CreateTextureSampler() {
     }
 }
 
+// 深度控制
+VkFormat VulkanContext::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
+    for (VkFormat format : candidates) {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, format, &props);
+
+        if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+            return format;
+        } else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+            return format;
+        }
+    }
+    HR_LOG_ERROR("VulkanContext: Failed to find supported format!");
+    return VK_FORMAT_UNDEFINED;
+}
+
+VkFormat VulkanContext::FindDepthFormat() {
+    // Search for optimal 32-bit float or 24-bit normalized depth formats supported by the GPU.
+    // 在硬件支持列表中寻找最优的 32 位浮点或 24 位归一化深度格式。
+    return FindSupportedFormat(
+        {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+    );
+}
+
+void VulkanContext::CreateDepthResources() {
+    VkFormat depthFormat = FindDepthFormat();
+
+    // Create an image specifically structured for depth testing.
+    // 创建专门用于深度测试的底层物理图像。
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, depthFormat, 
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_DepthImage, m_DepthImageMemory);
+    
+    // Abstract the depth image into an image view.
+    // 提取出深度图像的视图，并将其特征标记为深度属性 (DEPTH_BIT)。
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = m_DepthImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = depthFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(m_Device, &viewInfo, nullptr, &m_DepthImageView) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create depth image view!");
+    }
+    
+    HR_LOG_INFO("VulkanContext: Depth Resources created.");
+}
+
 
 void VulkanContext::CreateFramebuffers() {
     m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size());
 
     for (size_t i = 0; i < m_SwapchainImageViews.size(); i++) {
-        VkImageView attachments[] = {
-            m_SwapchainImageViews[i]
+        // Bind both the color and depth image views to the current framebuffer.
+        // 将颜色视图与深度视图一同绑定至当前帧缓冲。
+        std::array<VkImageView, 2> attachments = {
+            m_SwapchainImageViews[i],
+            m_DepthImageView
         };
 
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.renderPass = m_RenderPass; 
-        framebufferInfo.attachmentCount = 1;
-        framebufferInfo.pAttachments = attachments;
+        framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+        framebufferInfo.pAttachments = attachments.data();
         framebufferInfo.width = m_SwapchainExtent.width;
         framebufferInfo.height = m_SwapchainExtent.height;
         framebufferInfo.layers = 1;
@@ -827,18 +947,19 @@ void VulkanContext::CreateUniformBuffers() {
     }
 }
 
-void VulkanContext::UpdateUniformBuffer(uint32_t currentImage) {
-    static auto startTime = std::chrono::high_resolution_clock::now();
-    auto currentTime = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
+void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj) {
     UniformBufferObject ubo{};
     
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.proj = glm::perspective(glm::radians(45.0f), m_SwapchainExtent.width / (float) m_SwapchainExtent.height, 0.1f, 10.0f);
+    // Model remains static at the center of the world.
+    // 将模型固定在世界原点，不再随时间自转。
+    ubo.model = glm::mat4(1.0f); 
     
-    // Vulkan uses a downward-pointing Y axis, unlike OpenGL. Negate the Y scaling factor.
+    // Accept View and Projection matrices from the external Camera system.
+    // 接收来自外部摄像机系统计算好的观察与投影矩阵。
+    ubo.view = view;
+    ubo.proj = proj;
+    
+    // Vulkan uses a downward-pointing Y axis, unlike OpenGL.
     // Vulkan 的 Y 轴朝下（与 OpenGL 相反），对投影矩阵的 Y 轴缩放因子取反以校正画面。
     ubo.proj[1][1] *= -1;
 
@@ -959,16 +1080,15 @@ void VulkanContext::CreateSyncObjects() {
     HR_LOG_INFO("VulkanContext: Synchronization objects created.");
 }
 
-void VulkanContext::DrawFrame() {
+void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj) {
     // Wait for the previous frame to finish GPU execution.
     // 等待上一帧的 GPU 渲染执行完毕。
     vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
     vkResetFences(m_Device, 1, &m_InFlightFence);
 
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-    
-    UpdateUniformBuffer(imageIndex);
+    vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);    
+    UpdateUniformBuffer(imageIndex, view, proj);
     
     vkResetCommandBuffer(m_CommandBuffer, 0);
 
@@ -983,9 +1103,14 @@ void VulkanContext::DrawFrame() {
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = m_SwapchainExtent;
 
-    VkClearValue clearColor = {{{0.05f, 0.05f, 0.05f, 1.0f}}};
-    renderPassInfo.clearValueCount = 1;
-    renderPassInfo.pClearValues = &clearColor;
+    // Define clear values for both color and depth attachments.
+    // 为颜色与深度附件分别定义渲染起始的清空值。
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = {{0.05f, 0.05f, 0.05f, 1.0f}};
+    clearValues[1].depthStencil = {1.0f, 0};
+
+    renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    renderPassInfo.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(m_CommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -1094,6 +1219,13 @@ void VulkanContext::Cleanup() {
         vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
     }
         HR_LOG_INFO("VulkanContext: Framebuffers destroyed.");
+
+    if (m_DepthImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
+    if (m_DepthImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_Device, m_DepthImage, nullptr);
+        vkFreeMemory(m_Device, m_DepthImageMemory, nullptr);
+        HR_LOG_INFO("VulkanContext: Depth Resources destroyed.");
+    }
 
     if (m_GraphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
