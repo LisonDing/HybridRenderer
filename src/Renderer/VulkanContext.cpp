@@ -1,61 +1,17 @@
 // STB_IMAGE_IMPLEMENTATION must be defined in exactly ONE .cpp file.
 // STB_IMAGE_IMPLEMENTATION 宏必须且只能在一个 .cpp 文件中被定义。
 #define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 #include "VulkanContext.h"
 #include "../Core/Logger.h"
 #include <set>
 #include <string>
-
-#include <stb_image.h>
+#include <unordered_map>
 
 namespace Renderer {
-
-// Define 24 vertices for a 3D cube to ensure proper UV mapping on all 6 faces.
-// 定义 3D 立方体的 24 个独立顶点，以确保 6 个面的 UV 贴图坐标都能正确映射。
-const std::vector<Vertex> VERTICES = {
-    // Front face / 正面
-    {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-    // Back face / 背面
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    {{ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    // Top face / 顶面
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-    // Bottom face / 底面
-    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-    {{ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    // Right face / 右面
-    {{ 0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{ 0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    {{ 0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-    {{ 0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    // Left face / 左面
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
-    {{-0.5f, -0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
-    {{-0.5f,  0.5f,  0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f,  0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-};
-
-// Define 36 indices for the 12 triangles of the cube.
-// 定义 36 个索引，用于绘制立方体的 12 个三角形。
-const std::vector<uint16_t> INDICES = {
-    0, 1, 2, 2, 3, 0,       // Front
-    4, 5, 6, 6, 7, 4,       // Back
-    8, 9, 10, 10, 11, 8,    // Top
-    12, 13, 14, 14, 15, 12, // Bottom
-    16, 17, 18, 18, 19, 16, // Right
-    20, 21, 22, 22, 23, 20  // Left
-};
 
 std::vector<char> VulkanContext::ReadFile(const std::string& filename) {
     // Open file with cursor at the end (ate) and in binary mode to determine file size.
@@ -697,7 +653,7 @@ void VulkanContext::CreateTextureImage() {
 
     // Load image from disk. Force 4 channels (RGBA).
     // 从硬盘读取图片，强制转换为 4 通道 (RGBA)。
-    stbi_uc* pixels = stbi_load("../assets/textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    stbi_uc* pixels = stbi_load("../assets/textures/viking_room.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     if (!pixels) {
@@ -757,6 +713,59 @@ void VulkanContext::CreateTextureSampler() {
         HR_LOG_ERROR("VulkanContext: Failed to create texture sampler!");
     }
 }
+
+// 模型资产
+
+void VulkanContext::LoadModel() {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    // Load standard OBJ file from assets directory.
+    // 从资产目录加载标准的 OBJ 格式 3D 模型文件。
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "../assets/models/viking_room.obj")) {
+        HR_LOG_ERROR("VulkanContext: Failed to load model! " + warn + err);
+        return;
+    }
+
+    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+    for (const auto& shape : shapes) {
+        for (const auto& index : shape.mesh.indices) {
+            Vertex vertex{};
+
+            vertex.pos = {
+                attrib.vertices[3 * index.vertex_index + 0],
+                attrib.vertices[3 * index.vertex_index + 1],
+                attrib.vertices[3 * index.vertex_index + 2]
+            };
+
+            // Read UVs if they exist, obj files flip Y-axis for textures natively.
+            // 读取 UV 坐标（若存在）。OBJ 文件的 V 轴底层坐标系往往需要翻转 (1.0 - v)。
+            if (index.texcoord_index >= 0) {
+                vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1] 
+                };
+            }
+
+            vertex.color = {1.0f, 1.0f, 1.0f}; // Default white base color / 基础反照率设为纯白
+
+            // Vertex Deduplication: Only add new vertices to the VRAM buffer.
+            // 顶点去重优化：如果哈希表中没有这个顶点，才把它压入顶点缓冲，否则复用索引。
+            if (uniqueVertices.count(vertex) == 0) {
+                uniqueVertices[vertex] = static_cast<uint32_t>(m_Vertices.size());
+                m_Vertices.push_back(vertex);
+            }
+
+            m_Indices.push_back(uniqueVertices[vertex]);
+        }
+    }
+    
+    HR_LOG_INFO("VulkanContext: Model loaded. Vertices: " + std::to_string(m_Vertices.size()) + " Indices: " + std::to_string(m_Indices.size()));
+}
+
 
 // 深度控制
 VkFormat VulkanContext::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
@@ -843,7 +852,7 @@ void VulkanContext::CreateFramebuffers() {
 }
 
 void VulkanContext::CreateVertexBuffer() {
-    VkDeviceSize bufferSize = sizeof(VERTICES[0]) * VERTICES.size();
+    VkDeviceSize bufferSize = sizeof(m_Vertices[0]) * m_Vertices.size();
 
     // Create a host-visible staging buffer.
     // 创建主机可见的暂存缓冲。
@@ -855,7 +864,7 @@ void VulkanContext::CreateVertexBuffer() {
 
     void* data;
     vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); 
-    memcpy(data, VERTICES.data(), (size_t)bufferSize);                  
+    memcpy(data, m_Vertices.data(), (size_t)bufferSize);                  
     vkUnmapMemory(m_Device, stagingBufferMemory);                        
 
     // Create a device-local vertex buffer.
@@ -875,7 +884,7 @@ void VulkanContext::CreateVertexBuffer() {
 }
 
 void VulkanContext::CreateIndexBuffer() {
-    VkDeviceSize bufferSize = sizeof(INDICES[0]) * INDICES.size();
+    VkDeviceSize bufferSize = sizeof(m_Indices[0]) * m_Indices.size();
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -885,7 +894,7 @@ void VulkanContext::CreateIndexBuffer() {
 
     void* data;
     vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, INDICES.data(), (size_t)bufferSize);
+    memcpy(data, m_Indices.data(), (size_t)bufferSize);
     vkUnmapMemory(m_Device, stagingBufferMemory);
 
     CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 
@@ -1120,8 +1129,7 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj) {
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
 
-    vkCmdBindIndexBuffer(m_CommandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
-
+    vkCmdBindIndexBuffer(m_CommandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[imageIndex], 0, nullptr);
 
     VkViewport viewport{};
@@ -1138,8 +1146,7 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj) {
     scissor.extent = m_SwapchainExtent;
     vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
 
-    vkCmdDrawIndexed(m_CommandBuffer, static_cast<uint32_t>(INDICES.size()), 1, 0, 0, 0);
-
+    vkCmdDrawIndexed(m_CommandBuffer, static_cast<uint32_t>(m_Indices.size()), 1, 0, 0, 0);
     vkCmdEndRenderPass(m_CommandBuffer);
     if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to record command buffer!");

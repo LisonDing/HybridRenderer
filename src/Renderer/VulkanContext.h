@@ -6,11 +6,14 @@
 #include <optional>
 #include <array>
 #include <fstream>
+#include <unordered_map> // 用于顶点去重的哈希表
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL // 启用 GLM 的实验性功能，以使用 std::hash 支持 glm::vec3 和 glm::vec2
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 #include <chrono>
 
 namespace Renderer {
@@ -22,6 +25,12 @@ struct Vertex {
     glm::vec3 color;
     glm::vec2 texCoord; // New: Texture Coordinates (UV) / 新增：纹理坐标 (UV)
 
+    // Equality operator required for hash map deduplication.
+    // 哈希表去重需要的相等比较运算符。
+    bool operator==(const Vertex& other) const {
+        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+    }
+
     static VkVertexInputBindingDescription GetBindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
         bindingDescription.binding = 0;
@@ -29,7 +38,7 @@ struct Vertex {
         bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
         return bindingDescription;
     }
-
+    
     static std::array<VkVertexInputAttributeDescription, 3> GetAttributeDescriptions() {
         // Expanded to 3 attributes.
         // 扩展为 3 个属性描述符。
@@ -56,6 +65,20 @@ struct Vertex {
     }
 };
 
+} // namespace Renderer （临时闭合，注入std）
+
+namespace std {
+    // Inject custom hash function for the Vertex struct into the std namespace.
+    // 将 Vertex 结构体的自定义哈希函数注入 std 命名空间。
+    template<>
+    struct hash<Renderer::Vertex> {
+        size_t operator()(const Renderer::Vertex& v) const {
+            return hash<glm::vec3>()(v.pos) ^ hash<glm::vec3>()(v.color) ^ hash<glm::vec2>()(v.texCoord);
+        }
+    };
+} // namespace std
+
+namespace Renderer {
 // Uniform Buffer Object structure. Memory alignment is strictly enforced (16 bytes).
 // 统一缓冲对象结构体。强制实行 16 字节内存对齐，以符合 Vulkan 规范。
 struct UniformBufferObject {
@@ -131,6 +154,9 @@ public:
     // --- Depth Testing & Blending ---
     void CreateDepthResources();
 
+    // --- Model Loading & Asset Management ---
+    void LoadModel();
+
     // --- Execution ---
     void DrawFrame(const glm::mat4& view, const glm::mat4& proj); 
     void Cleanup();
@@ -173,6 +199,11 @@ private:
     VkDeviceMemory m_TextureImageMemory = VK_NULL_HANDLE;
     VkImageView    m_TextureImageView = VK_NULL_HANDLE;
     VkSampler      m_TextureSampler = VK_NULL_HANDLE;
+
+    // Model Data
+    // 模型数据
+    std::vector<Vertex> m_Vertices;
+    std::vector<uint32_t> m_Indices;
 
     // Command & Synchronization
     // 命令与同步对象

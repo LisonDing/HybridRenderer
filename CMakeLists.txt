@@ -46,13 +46,34 @@ if(NOT EXISTS ${STB_IMAGE_FILE})
     )
 endif()
 
+# 5. 自动下载tinyobjloader (单头文件库，用于加载 OBJ 模型)
+set(TINYOBJ_DIR "${CMAKE_SOURCE_DIR}/external/tinyobjloader")
+set(TINYOBJ_FILE "${TINYOBJ_DIR}/tiny_obj_loader.h")
+
+if(NOT EXISTS ${TINYOBJ_FILE})
+    file(MAKE_DIRECTORY ${TINYOBJ_DIR})
+    message(STATUS "Downloading tiny_obj_loader.h from GitHub master branch...")
+    file(DOWNLOAD 
+        "https://raw.githubusercontent.com/tinyobjloader/tinyobjloader/master/tiny_obj_loader.h" 
+        ${TINYOBJ_FILE}
+        SHOW_PROGRESS
+        STATUS DOWNLOAD_STATUS # 捕获下载状态
+    )
+    # 如果下载失败，在终端报错提示
+    list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+    if(NOT STATUS_CODE EQUAL 0)
+        message(FATAL_ERROR "Failed to download tinyobjloader. Please check your network or download it manually.")
+    endif()
+endif()
+
+
 # ==========================================
 # 核心引擎构建 (Target Creation) - 移到前面！
 # ==========================================
 file(GLOB_RECURSE SRC_FILES "src/*.cpp" "src/*.h")
 add_executable(HybridRenderer ${SRC_FILES})
 
-target_include_directories(HybridRenderer PRIVATE src ${STB_IMAGE_DIR})
+target_include_directories(HybridRenderer PRIVATE src ${STB_IMAGE_DIR} ${CMAKE_SOURCE_DIR}/external/tinyobjloader)
 target_link_libraries(HybridRenderer PRIVATE Vulkan::Vulkan glfw glm::glm)
 
 if (APPLE)

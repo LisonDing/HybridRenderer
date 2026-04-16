@@ -150,6 +150,8 @@ int main() {
     vkContext.CreateTextureImageView(); // 创建纹理图像视图，抽象底层图像资源, 用于识别纹理属性
     vkContext.CreateTextureSampler(); // 创建纹理采样器，定义纹理过滤与边界处理方式
     
+    vkContext.LoadModel(); // 加载模型数据到内存，准备上传到 GPU
+
     vkContext.CreateVertexBuffer(); // 创建顶点缓冲区并上传顶点数据
     vkContext.CreateIndexBuffer(); // 创建索引缓冲区并上传索引数据
     vkContext.CreateUniformBuffers(); // 创建统一缓冲区，用于存储 MVP 矩阵等动态数据
