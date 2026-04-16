@@ -113,6 +113,20 @@ public:
     void CreateDescriptorSets();
     void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
+    // --- Helper Functions for Commands & Images ---
+    // 命令录制与图像处理的底层辅助函数
+    VkCommandBuffer BeginSingleTimeCommands();
+    void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
+    void CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+    void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+    void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+    VkImageView CreateImageView(VkImage image, VkFormat format); // Refactored for reuse / 提取出来以便复用
+
+    // --- Texture Resources ---
+    void CreateTextureImage();
+    void CreateTextureImageView();
+    void CreateTextureSampler();
+
     // --- Execution ---
     void DrawFrame(); 
     void Cleanup();
@@ -148,6 +162,13 @@ private:
     VkRenderPass     m_RenderPass     = VK_NULL_HANDLE;
     VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
     VkPipeline       m_GraphicsPipeline = VK_NULL_HANDLE;
+
+    // Texture Resources
+    // 纹理贴图
+    VkImage        m_TextureImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_TextureImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_TextureImageView = VK_NULL_HANDLE;
+    VkSampler      m_TextureSampler = VK_NULL_HANDLE;
 
     // Command & Synchronization
     // 命令与同步对象

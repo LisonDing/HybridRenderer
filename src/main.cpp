@@ -66,11 +66,15 @@ int main() {
     // Phase 3: Assets & Memory Management
     // 阶段 3：资产加载、内存分配与描述符绑定
     // ==========================================
+    vkContext.CreateTextureImage();      // 必须在管线绘制前准备好贴图
+    vkContext.CreateTextureImageView();
+    vkContext.CreateTextureSampler();
+    
     vkContext.CreateVertexBuffer();
     vkContext.CreateIndexBuffer();
     vkContext.CreateUniformBuffers();
     vkContext.CreateDescriptorPool();
-    vkContext.CreateDescriptorSets();
+    vkContext.CreateDescriptorSets();    // 必须在 TextureImage 和 Sampler 就绪后调用
     
     // ==========================================
     // Phase 4: Main Execution Loop
