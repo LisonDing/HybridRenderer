@@ -757,6 +757,16 @@ void VulkanContext::LoadModel() {
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1] 
                 };
             }
+            // 【新增】：读取法线数据 (Normals)
+            if (index.normal_index >= 0) {
+                vertex.normal = {
+                    attrib.normals[3 * index.normal_index + 0],
+                    attrib.normals[3 * index.normal_index + 1],
+                    attrib.normals[3 * index.normal_index + 2]
+                };
+            } else {
+                vertex.normal = {0.0f, 0.0f, 1.0f}; // Fallback normal
+            }
 
             vertex.color = {1.0f, 1.0f, 1.0f}; // Default white base color / 基础反照率设为纯白
 
@@ -976,7 +986,7 @@ void VulkanContext::CreateUniformBuffers() {
     }
 }
 
-void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj) {
+void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos) {
     UniformBufferObject ubo{};
     
     // Model remains static at the center of the world.
@@ -991,6 +1001,10 @@ void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& 
     // Vulkan uses a downward-pointing Y axis, unlike OpenGL.
     // Vulkan 的 Y 轴朝下（与 OpenGL 相反），对投影矩阵的 Y 轴缩放因子取反以校正画面。
     ubo.proj[1][1] *= -1;
+
+    // 光照与视角
+    ubo.lightDir = glm::normalize(glm::vec3(5.0f, 10.0f, 5.0f)); 
+    ubo.viewPos = viewPos;
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -1109,7 +1123,7 @@ void VulkanContext::CreateSyncObjects() {
     HR_LOG_INFO("VulkanContext: Synchronization objects created.");
 }
 
-void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj) {
+void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos) {
     // Wait for the previous frame to finish GPU execution.
     // 等待上一帧的 GPU 渲染执行完毕。
     vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
@@ -1117,7 +1131,7 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj) {
 
     uint32_t imageIndex;
     vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);    
-    UpdateUniformBuffer(imageIndex, view, proj);
+    UpdateUniformBuffer(imageIndex, view, proj, viewPos);
     
     vkResetCommandBuffer(m_CommandBuffer, 0);
 

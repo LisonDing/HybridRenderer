@@ -203,7 +203,7 @@ int main() {
 
         // Inject matrices into the rendering pipeline.
         // 将矩阵注入渲染管线。
-        vkContext.DrawFrame(view, proj); 
+        vkContext.DrawFrame(view, proj,camera.Position); 
     }
     
     vkDeviceWaitIdle(vkContext.GetDevice()); 

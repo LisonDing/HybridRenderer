@@ -23,12 +23,12 @@ namespace Renderer {
 struct Vertex {
     glm::vec3 pos;
     glm::vec3 color;
-    glm::vec2 texCoord; // New: Texture Coordinates (UV) / 新增：纹理坐标 (UV)
+    glm::vec2 texCoord; 
+    glm::vec3 normal; // 【新增】顶点法线向量，用于光照计算
 
-    // Equality operator required for hash map deduplication.
-    // 哈希表去重需要的相等比较运算符。
+    // 更新相等运算符
     bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+        return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal;
     }
 
     static VkVertexInputBindingDescription GetBindingDescription() {
@@ -38,11 +38,10 @@ struct Vertex {
         bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
         return bindingDescription;
     }
-    
-    static std::array<VkVertexInputAttributeDescription, 3> GetAttributeDescriptions() {
-        // Expanded to 3 attributes.
-        // 扩展为 3 个属性描述符。
-        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
+
+    // 将属性数量从 3 提升到 4
+    static std::array<VkVertexInputAttributeDescription, 4> GetAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions{};
 
         attributeDescriptions[0].binding = 0;
         attributeDescriptions[0].location = 0;
@@ -54,12 +53,16 @@ struct Vertex {
         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
-        // Texture coordinate attribute.
-        // 纹理坐标属性，对应 location = 2。
         attributeDescriptions[2].binding = 0;
         attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
         attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
+        // 【新增】法线属性映射
+        attributeDescriptions[3].binding = 0;
+        attributeDescriptions[3].location = 3;
+        attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[3].offset = offsetof(Vertex, normal);
 
         return attributeDescriptions;
     }
@@ -70,10 +73,12 @@ struct Vertex {
 namespace std {
     // Inject custom hash function for the Vertex struct into the std namespace.
     // 将 Vertex 结构体的自定义哈希函数注入 std 命名空间。
-    template<>
-    struct hash<Renderer::Vertex> {
-        size_t operator()(const Renderer::Vertex& v) const {
-            return hash<glm::vec3>()(v.pos) ^ hash<glm::vec3>()(v.color) ^ hash<glm::vec2>()(v.texCoord);
+    template<> struct hash<Renderer::Vertex> {
+        size_t operator()(Renderer::Vertex const& vertex) const {
+            return ((hash<glm::vec3>()(vertex.pos) ^
+                   (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+                   (hash<glm::vec2>()(vertex.texCoord) << 1) ^
+                   (hash<glm::vec3>()(vertex.normal) << 1); // 【新增】将法线纳入哈希计算
         }
     };
 } // namespace std
@@ -85,6 +90,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+    alignas(16) glm::vec3 lightDir; // 【新增】平行光方向
+    alignas(16) glm::vec3 viewPos;  // 【新增】摄像机世界坐标
 };
 
 // Stores the indices of available Vulkan queue families.
@@ -158,14 +165,14 @@ public:
     void LoadModel();
 
     // --- Execution ---
-    void DrawFrame(const glm::mat4& view, const glm::mat4& proj); 
+    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos); 
     void Cleanup();
 
 private:
     QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
-    void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj);
+    void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos);
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
