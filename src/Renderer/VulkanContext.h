@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glm/fwd.hpp"
+#include <sys/types.h>
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <optional>
@@ -148,10 +149,10 @@ public:
     // 命令录制与图像处理的底层辅助函数
     VkCommandBuffer BeginSingleTimeCommands();
     void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
-    void CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
-    void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+    void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+    void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
     void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-    VkImageView CreateImageView(VkImage image, VkFormat format); // Refactored for reuse / 提取出来以便复用
+    VkImageView CreateImageView(VkImage image, VkFormat format, uint32_t mipLevels); // Refactored for reuse / 提取出来以便复用
 
     // --- Texture Resources ---
     void CreateTextureImage();
@@ -175,6 +176,7 @@ private:
     void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos);
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
+    void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
 
     // Core Vulkan Handles
     // Vulkan 核心层级句柄
@@ -202,6 +204,7 @@ private:
 
     // Texture Resources
     // 纹理贴图
+    uint32_t       m_MipLevels = 1; // 纹理 mipmap 层级数量
     VkImage        m_TextureImage = VK_NULL_HANDLE;
     VkDeviceMemory m_TextureImageMemory = VK_NULL_HANDLE;
     VkImageView    m_TextureImageView = VK_NULL_HANDLE;
@@ -211,6 +214,7 @@ private:
     // 模型数据
     std::vector<Vertex> m_Vertices;
     std::vector<uint32_t> m_Indices;
+
 
     // Command & Synchronization
     // 命令与同步对象
