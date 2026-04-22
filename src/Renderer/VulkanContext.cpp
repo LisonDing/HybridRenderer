@@ -650,8 +650,9 @@ void VulkanContext::GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t
     VkFormatProperties formatProperties;
     vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, imageFormat, &formatProperties);
 
-    if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
-        HR_LOG_ERROR("VulkanContext: Texture image format does not support linear blitting!");
+    if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) || !(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) || !(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT)) {
+        HR_LOG_ERROR("VulkanContext: Texture format does not support blitting! Falling back to no mipmaps.");
+        TransitionImageLayout(image, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
         return;
     }
 
@@ -752,17 +753,20 @@ void VulkanContext::CreateTextureImage() {
     // 将像素复制到暂存缓冲后，释放系统 RAM 中的图片数据。
     stbi_image_free(pixels);
 
-    CreateImage(texWidth, texHeight, m_MipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
+    // 避开 MAC 设备上对 VK_FORMAT_R8G8B8A8_SRGB 的线性过滤限制，直接使用 optimalTiling 来创建图像。
+    VkFormat safeFormat = VK_FORMAT_R8G8B8A8_UNORM;
+
+    CreateImage(texWidth, texHeight, m_MipLevels, safeFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
 
     // Transition -> Copy -> Transition to Shader Read Optimization
     // 转换布局 -> 复制数据 -> 转换至着色器读取最优化布局
-    TransitionImageLayout(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_MipLevels);
+    TransitionImageLayout(m_TextureImage, safeFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_MipLevels);
     CopyBufferToImage(stagingBuffer, m_TextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-    // TransitionImageLayout(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_MipLevels);
+    // TransitionImageLayout(m_TextureImage, safeFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_MipLevels);
 
     // Auto-generate mipmaps on the GPU and transition layouts
     // 在 GPU 上自动生成 mipmaps 并转换布局
-    GenerateMipmaps(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, m_MipLevels);
+    GenerateMipmaps(m_TextureImage, safeFormat, texWidth, texHeight, m_MipLevels);
 
     vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
     vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
@@ -771,7 +775,7 @@ void VulkanContext::CreateTextureImage() {
 }
 
 void VulkanContext::CreateTextureImageView() {
-    m_TextureImageView = CreateImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, m_MipLevels);
+    m_TextureImageView = CreateImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_UNORM, m_MipLevels);
      HR_LOG_INFO("VulkanContext: Texture Image View created.");
 }
 
@@ -1066,7 +1070,7 @@ void VulkanContext::CreateDescriptorSetLayout() {
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; 
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; 
 
     // New binding for the Image Sampler at index 1.
     // 针对索引 1 新增的图像采样器绑定。
