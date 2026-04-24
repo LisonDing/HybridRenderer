@@ -25,7 +25,7 @@ void main() {
     vec3 textureColor = texture(texSampler, fragTexCoord).rgb * fragColor;
 
     // Ambient component
-    float ambientStrength = 0.15;
+    float ambientStrength = 0.5;
     vec3 ambient = ambientStrength * textureColor;
 
     // Diffuse component

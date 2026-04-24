@@ -248,7 +248,7 @@ void VulkanContext::CreateSwapchain(uint32_t width, uint32_t height) {
 void VulkanContext::CreateImageViews() {
     m_SwapchainImageViews.resize(m_SwapchainImages.size());
     for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
-        CreateImageView(m_SwapchainImages[i], m_SwapchainImageFormat, 1);
+        m_SwapchainImageViews[i] = CreateImageView(m_SwapchainImages[i], m_SwapchainImageFormat, 1);
     }
     HR_LOG_INFO("VulkanContext: Swapchain Image Views created.");
 }
@@ -724,7 +724,7 @@ void VulkanContext::CreateTextureImage() {
 
     // Tell stb_image to flip the Y-axis during load to match Vulkan/GLM coordinates.
     // 指示 stb_image 在加载时翻转 Y 轴，以匹配我们的 Vulkan/GLM 坐标系修正。
-    stbi_set_flip_vertically_on_load(true);
+    // stbi_set_flip_vertically_on_load(true);
 
     // Load image from disk. Force 4 channels (RGBA).
     // 从硬盘读取图片，强制转换为 4 通道 (RGBA)。
@@ -754,7 +754,7 @@ void VulkanContext::CreateTextureImage() {
     stbi_image_free(pixels);
 
     // 避开 MAC 设备上对 VK_FORMAT_R8G8B8A8_SRGB 的线性过滤限制，直接使用 optimalTiling 来创建图像。
-    VkFormat safeFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat safeFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
     CreateImage(texWidth, texHeight, m_MipLevels, safeFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
 
@@ -775,7 +775,7 @@ void VulkanContext::CreateTextureImage() {
 }
 
 void VulkanContext::CreateTextureImageView() {
-    m_TextureImageView = CreateImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_UNORM, m_MipLevels);
+    m_TextureImageView = CreateImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, m_MipLevels);
      HR_LOG_INFO("VulkanContext: Texture Image View created.");
 }
 
