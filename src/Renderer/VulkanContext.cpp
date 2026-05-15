@@ -109,10 +109,14 @@ void VulkanContext::PickPhysicalDevice() {
     // 选取首个可用的物理设备。
     m_PhysicalDevice = devices[0];
 
+    // 查询支持的最大 MSAA
+    m_MsaaSamples = GetMaxUsableSampleCount();
+
     VkPhysicalDeviceProperties deviceProperties;
     vkGetPhysicalDeviceProperties(m_PhysicalDevice, &deviceProperties);
-    
-    HR_LOG_INFO(std::string("VulkanContext: Picked Physical Device: ") + deviceProperties.deviceName);
+
+    HR_LOG_INFO(std::string("VulkanContext: Max Usable MSAA Samples: ") + deviceProperties.deviceName);
+    HR_LOG_INFO("VulkanContext : Max MSAA Samples: " + std::to_string(m_MsaaSamples));
 }
 
 QueueFamilyIndices VulkanContext::FindQueueFamilies(VkPhysicalDevice device) {
@@ -258,7 +262,7 @@ void VulkanContext::CreateRenderPass() {
     // 颜色附件描述。
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = m_SwapchainImageFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; 
+    colorAttachment.samples = m_MsaaSamples; 
     
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; 
@@ -267,19 +271,30 @@ void VulkanContext::CreateRenderPass() {
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;  
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;  // 保持为 COLOR_ATTACHMENT_OPTIMAL 以支持 MSAA 渲染后的正确解析和呈现。
 
     // New: Depth attachment description.
     // 新增：深度附件描述，用于每帧渲染前的深度清空操作。
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = FindDepthFormat();
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = m_MsaaSamples; // Depth attachment should match MSAA sample count for proper multisampled depth testing / 深度附件应与 MSAA 采样数匹配以实现正确的多重采样深度测试。
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    
+    // 颜色解析附件 （仅在 MSAA 启用时使用）
+    VkAttachmentDescription colorAttachmentResolve{};
+    colorAttachmentResolve.format = m_SwapchainImageFormat;
+    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // Resolve attachment is always single-sampled / 解析附件始终为单采样。
+    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 解析后的图像直接用于呈现
 
     // Attachment reference for subpass usage.
     // 供子通道调用的附件引用。
@@ -291,6 +306,10 @@ void VulkanContext::CreateRenderPass() {
     depthAttachmentRef.attachment = 1; // Index 1 in the attachments array / 位于附件数组的索引 1
     depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentReference colorAttachmentResolveRef{};
+    colorAttachmentResolveRef.attachment = 2; // Index 2 in the attachments array / 位于附件数组的索引 2
+    colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // Resolve attachment is used as a color attachment during the subpass / 解析附件在子通道中作为颜色附件使用
+
     // Subpass description.
     // 子通道描述。
     VkSubpassDescription subpass{};
@@ -298,8 +317,18 @@ void VulkanContext::CreateRenderPass() {
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef; // Bind depth to subpass / 将深度附件绑定至子通道
+    subpass.pResolveAttachments = &colorAttachmentResolveRef; // Resolve attachment for MSAA / MSAA 的解析附件
 
-    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
+    // 子通道依赖 - 确保在子通道执行前，交换链图像已经准备好被写入（从外部队列转到当前子通道）。
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT; // Wait for color attachment output and depth tests to complete / 等待颜色附件输出和深度测试完成
+    dependency.srcAccessMask = 0; // No need to wait on specific access types / 不需要等待特定访问类型
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT; // Ensure subpass waits for these stages / 确保子通道等待这些阶段
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT; // Wait for write access to color and depth attachments / 等待对颜色和深度附件的写访问
+
+    std::array<VkAttachmentDescription, 3> attachments = {colorAttachment, depthAttachment, colorAttachmentResolve};
 
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -307,7 +336,8 @@ void VulkanContext::CreateRenderPass() {
     renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
-    
+    renderPassInfo.dependencyCount = 1;
+    renderPassInfo.pDependencies = &dependency;
 
     if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to create Render Pass!");
@@ -398,7 +428,7 @@ void VulkanContext::CreateGraphicsPipeline() {
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = m_MsaaSamples;
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -531,8 +561,7 @@ void VulkanContext::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceS
 }
 
 // 图像内存控制
-
-void VulkanContext::CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+void VulkanContext::CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -545,7 +574,7 @@ void VulkanContext::CreateImage(uint32_t width, uint32_t height, uint32_t mipLev
     imageInfo.tiling = tiling;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageInfo.usage = usage;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.samples = numSamples;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (vkCreateImage(m_Device, &imageInfo, nullptr, &image) != VK_SUCCESS) {
@@ -756,7 +785,7 @@ void VulkanContext::CreateTextureImage() {
     // 避开 MAC 设备上对 VK_FORMAT_R8G8B8A8_SRGB 的线性过滤限制，直接使用 optimalTiling 来创建图像。
     VkFormat safeFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
-    CreateImage(texWidth, texHeight, m_MipLevels, safeFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
+    CreateImage(texWidth, texHeight, m_MipLevels, VK_SAMPLE_COUNT_1_BIT, safeFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
 
     // Transition -> Copy -> Transition to Shader Read Optimization
     // 转换布局 -> 复制数据 -> 转换至着色器读取最优化布局
@@ -949,12 +978,39 @@ VkFormat VulkanContext::FindDepthFormat() {
     );
 }
 
+VkSampleCountFlagBits VulkanContext::GetMaxUsableSampleCount() {
+    VkPhysicalDeviceProperties physicalDeviceProperties;
+    vkGetPhysicalDeviceProperties(m_PhysicalDevice, &physicalDeviceProperties);
+
+    VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+    if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+    if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+    if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+    if (counts & VK_SAMPLE_COUNT_8_BIT)  { return VK_SAMPLE_COUNT_8_BIT; }
+    if (counts & VK_SAMPLE_COUNT_4_BIT)  { return VK_SAMPLE_COUNT_4_BIT; }
+    if (counts & VK_SAMPLE_COUNT_2_BIT)  { return VK_SAMPLE_COUNT_2_BIT; }
+
+    return VK_SAMPLE_COUNT_1_BIT;
+}
+
+void VulkanContext::CreateColorResources() {
+    VkFormat colorFormat = m_SwapchainImageFormat;
+
+    // Create an image specifically structured for MSAA rendering.
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, m_MsaaSamples, colorFormat,
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_ColorImage, m_ColorImageMemory);
+    
+    m_ColorImageView = CreateImageView(m_ColorImage, colorFormat, 1);
+    HR_LOG_INFO("VulkanContext: Color Resources created.");
+}
+
 void VulkanContext::CreateDepthResources() {
     VkFormat depthFormat = FindDepthFormat();
 
     // Create an image specifically structured for depth testing.
     // 创建专门用于深度测试的底层物理图像。
-    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, depthFormat, 
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, m_MsaaSamples, depthFormat,
                 VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_DepthImage, m_DepthImageMemory);
     
@@ -985,9 +1041,10 @@ void VulkanContext::CreateFramebuffers() {
     for (size_t i = 0; i < m_SwapchainImageViews.size(); i++) {
         // Bind both the color and depth image views to the current framebuffer.
         // 将颜色视图与深度视图一同绑定至当前帧缓冲。
-        std::array<VkImageView, 2> attachments = {
+        std::array<VkImageView, 3> attachments = {
+            m_ColorImageView,
+            m_DepthImageView,
             m_SwapchainImageViews[i],
-            m_DepthImageView
         };
 
         VkFramebufferCreateInfo framebufferInfo{};
@@ -1392,6 +1449,13 @@ void VulkanContext::Cleanup() {
         vkDestroyImage(m_Device, m_DepthImage, nullptr);
         vkFreeMemory(m_Device, m_DepthImageMemory, nullptr);
         HR_LOG_INFO("VulkanContext: Depth Resources destroyed.");
+    }
+
+    if (m_ColorImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_ColorImageView, nullptr);
+    if (m_ColorImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_Device, m_ColorImage, nullptr);
+        vkFreeMemory(m_Device, m_ColorImageMemory, nullptr);
+        HR_LOG_INFO("VulkanContext: MASS Color Resources destroyed.");
     }
 
     if (m_GraphicsPipeline != VK_NULL_HANDLE) {

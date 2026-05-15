@@ -153,6 +153,7 @@ int main() {
     vkContext.CreateRenderPass(); // 创建渲染通道，定义渲染流程与附件格式
     vkContext.CreateDescriptorSetLayout(); // 创建描述符集布局，定义着色器资源绑定
     vkContext.CreateGraphicsPipeline(); // 创建图形管线，绑定着色器与固定功能状态
+    vkContext.CreateColorResources(); // 创建多重采样用的颜色资源
     vkContext.CreateDepthResources(); // 创建深度缓冲区资源
     vkContext.CreateFramebuffers(); // 创建帧缓冲区，绑定交换链图像视图与深度视图
 

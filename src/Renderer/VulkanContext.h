@@ -149,7 +149,7 @@ public:
     // 命令录制与图像处理的底层辅助函数
     VkCommandBuffer BeginSingleTimeCommands();
     void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
-    void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+    void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels,VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
     void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
     void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     VkImageView CreateImageView(VkImage image, VkFormat format, uint32_t mipLevels); // Refactored for reuse / 提取出来以便复用
@@ -161,6 +161,7 @@ public:
 
     // --- Depth Testing & Blending ---
     void CreateDepthResources();
+    void CreateColorResources(); // Helper to create the color image used for MSAA rendering.
 
     // --- Model Loading & Asset Management ---
     void LoadModel();
@@ -177,6 +178,7 @@ private:
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
     void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
+    VkSampleCountFlagBits GetMaxUsableSampleCount(); // Helper to query the maximum supported MSAA sample count for the device.
 
     // Core Vulkan Handles
     // Vulkan 核心层级句柄
@@ -195,6 +197,13 @@ private:
     std::vector<VkImage> m_SwapchainImages;
     std::vector<VkImageView> m_SwapchainImageViews;
     std::vector<VkFramebuffer> m_SwapchainFramebuffers;
+
+    // Sampling & MSAA
+    // 采样与多重采样资源
+    VkSampleCountFlagBits m_MsaaSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkImage               m_ColorImage = VK_NULL_HANDLE;
+    VkDeviceMemory        m_ColorImageMemory = VK_NULL_HANDLE;
+    VkImageView           m_ColorImageView = VK_NULL_HANDLE;
 
     // Pipeline & Rendering
     // 渲染管线相关资源
