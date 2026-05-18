@@ -66,6 +66,24 @@ if(NOT EXISTS ${TINYOBJ_FILE})
     endif()
 endif()
 
+# Dear ImGui (Docking GUI 库)
+set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/external/imgui")
+if(NOT EXISTS ${IMGUI_DIR})
+    message(STATUS "Cloning Dear ImGui from GitHub...")
+    execute_process(
+        # 强制克隆 docking 分支 支持高级窗口停靠功能
+        COMMAND git clone -b docking https://github.com/ocornut/imgui.git ${IMGUI_DIR})
+endif()
+# ImGUI 的源文件列表（核心 + 后端实现）
+file(GLOB IMGUI_SOURCES 
+    "${IMGUI_DIR}/imgui.cpp" 
+    "${IMGUI_DIR}/imgui_draw.cpp" 
+    "${IMGUI_DIR}/imgui_tables.cpp"
+    "${IMGUI_DIR}/imgui_widgets.cpp"
+    "${IMGUI_DIR}/backends/imgui_impl_glfw.cpp"
+    "${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp"
+)
+        
 
 # ==========================================
 # 核心引擎构建 (Target Creation) - 移到前面！
@@ -73,8 +91,9 @@ endif()
 file(GLOB_RECURSE SRC_FILES "src/*.cpp" "src/*.h")
 add_executable(HybridRenderer ${SRC_FILES})
 
-target_include_directories(HybridRenderer PRIVATE src ${STB_IMAGE_DIR} ${CMAKE_SOURCE_DIR}/external/tinyobjloader)
+target_include_directories(HybridRenderer PRIVATE src ${STB_IMAGE_DIR} ${CMAKE_SOURCE_DIR}/external/tinyobjloader ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(HybridRenderer PRIVATE Vulkan::Vulkan glfw glm::glm)
+target_sources(HybridRenderer PRIVATE ${IMGUI_SOURCES})
 
 if (APPLE)
     target_link_libraries(HybridRenderer PRIVATE "-framework Cocoa" "-framework IOKit" "-framework CoreFoundation")

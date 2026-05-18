@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glm/fwd.hpp"
+#include "imgui_impl_glfw.h"
 #include <sys/types.h>
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -93,6 +94,10 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
     alignas(16) glm::vec3 lightDir; // 【新增】平行光方向
     alignas(16) glm::vec3 viewPos;  // 【新增】摄像机世界坐标
+
+    // 光照控制参数
+    alignas(4) float ambientStrength; // 环境光强度
+    alignas(4) float specularStrength; // 镜面光强度
 };
 
 // Stores the indices of available Vulkan queue families.
@@ -166,15 +171,18 @@ public:
     // --- Model Loading & Asset Management ---
     void LoadModel();
 
+    // --- ImGui Integration ---
+    void InitImGui (struct GLFWwindow* window);
+
     // --- Execution ---
-    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos); 
+    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float ambientStrength, float specularStrength); 
     void Cleanup();
 
 private:
     QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
-    void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos);
+    void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos, const glm::vec3& lightDir, float ambientStrength, float specularStrength);
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
     void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
@@ -252,6 +260,7 @@ private:
     // 描述符与统一缓冲资源
     VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool      m_DescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorPool      m_ImGuiDescriptorPool = VK_NULL_HANDLE; // 专门为 ImGui 创建的描述符池
     std::vector<VkDescriptorSet> m_DescriptorSets;
     std::vector<VkBuffer>       m_UniformBuffers;
     std::vector<VkDeviceMemory> m_UniformBuffersMemory;

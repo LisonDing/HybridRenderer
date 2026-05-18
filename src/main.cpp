@@ -7,10 +7,14 @@
 #include "Core/Camera.h"
 #include "Renderer/VulkanContext.h"
 
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
+
 // Constants and Global Camera State
 // 常量与全局摄像机状态 (由于 GLFW C-API 回调的限制，需要使用全局或静态变量)
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
+const uint32_t WIDTH = 1280;
+const uint32_t HEIGHT = 720;
 
 // 在 WIDTH 和 HEIGHT 下方，替换原有的 Camera 状态
 Core::Camera camera(glm::vec3(0.0f, 0.0f, 0.0f), 4.0f); // 目标点在原点，距离 4.0
@@ -31,6 +35,8 @@ float lastFrame = 0.0f;
 // Mouse movement callback.
 // 鼠标位移回调函数。
 void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
+    if (ImGui::GetIO().WantCaptureMouse) return; // 如果 ImGui 正在捕获鼠标输入，则不处理摄像机控制，避免冲突。
+
     float xpos = static_cast<float>(xposIn);
     float ypos = static_cast<float>(yposIn);
 
@@ -87,12 +93,16 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    if (ImGui::GetIO().WantCaptureMouse) return; 
+
     // 【Blender 逻辑】滚轮 = 以焦点为基准拉近/推远 (Zoom)
     // 稍微调高一点灵敏度，让滚轮缩放更爽快
     camera.ProcessZoom(static_cast<float>(yoffset), 0.8f); 
 }
 
 void processInput(GLFWwindow *window) {
+    if (ImGui::GetIO().WantCaptureKeyboard) return; 
+
     // ESC 退出
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
@@ -146,9 +156,17 @@ int main() {
     // Phase 1: Hardware & Rendering Infrastructure
     // 阶段 1：硬件设备与渲染基础设施初始化
     // ==========================================
+    glfwSetCursorPosCallback(window, mouse_callback); // 绑定鼠标回调函数
+    glfwSetScrollCallback(window, scroll_callback); // 绑定滚轮回调函数
+    
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // 初始状态下显示鼠标指针
+
     vkContext.PickPhysicalDevice(); // 选择物理设备（GPU）
     vkContext.CreateLogicalDevice(); // 创建逻辑设备与获取队列
-    vkContext.CreateSwapchain(WIDTH, HEIGHT); // 创建交换链与相关图像资源
+    
+    int fbWidth, fbHeight;
+    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+    vkContext.CreateSwapchain(fbWidth, fbHeight); // 创建交换链与相关图像资源
     vkContext.CreateImageViews(); // 创建交换链图像视图
     vkContext.CreateRenderPass(); // 创建渲染通道，定义渲染流程与附件格式
     vkContext.CreateDescriptorSetLayout(); // 创建描述符集布局，定义着色器资源绑定
@@ -156,6 +174,8 @@ int main() {
     vkContext.CreateColorResources(); // 创建多重采样用的颜色资源
     vkContext.CreateDepthResources(); // 创建深度缓冲区资源
     vkContext.CreateFramebuffers(); // 创建帧缓冲区，绑定交换链图像视图与深度视图
+
+    // vkContext.InitImGui(window); // 初始化 ImGui，创建专用描述符池并绑定 Vulkan 与 GLFW
 
     // ==========================================
     // Phase 2: Command & Synchronization Systems
@@ -180,6 +200,11 @@ int main() {
     vkContext.CreateUniformBuffers(); // 创建统一缓冲区，用于存储 MVP 矩阵等动态数据
     vkContext.CreateDescriptorPool(); // 创建描述符池，管理描述符集的分配
     vkContext.CreateDescriptorSets(); // 创建描述符集，绑定纹理与 uniform 数据，必须在纹理资源创建完成后进行绑定
+
+    vkContext.InitImGui(window); // 初始化 ImGui，创建专用描述符池并绑定 Vulkan 与 GLFW
+    glm::vec3 lightDir = glm::vec3(5.0f, 10.0f, 3.0f); // 定义一个固定的光照方向
+    float ambientStrength = 0.5f; // 环境光强度
+    float specularStrength = 0.5f; // 镜面反射强
     // ==========================================
     // Phase 4: Main Execution Loop
     // 阶段 4：引擎主执行循环
@@ -196,6 +221,29 @@ int main() {
         processInput(window);
         glfwPollEvents();
 
+        // UI Rendering with ImGui
+        // 使用 ImGui 构建 UI 界面
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        // 设置窗口大小与位置
+        ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Once);
+        ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_Once);
+
+        ImGui::Begin("Control Panel");
+        ImGui::Text("Hybrid Renderer Engine");
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+        ImGui::Separator();
+        // 实时渲染参数滑块
+        ImGui::Text("Lighting Settings");
+        ImGui::SliderFloat("Light Dir", &lightDir.x, -10.0f, 10.0f);
+        ImGui::SliderFloat("Ambient Strength", &ambientStrength, 0.0f, 1.0f);
+        ImGui::SliderFloat("Specular Strength", &specularStrength, 0.0f, 2.0f);
+
+        ImGui::End();
+        // 发送UI数据到GPU并渲染
+        ImGui::Render();
+
         // Compute current View and Projection matrices.
         // 计算当前帧的观察与投影矩阵。
         glm::mat4 view = camera.GetViewMatrix();
@@ -204,7 +252,7 @@ int main() {
 
         // Inject matrices into the rendering pipeline.
         // 将矩阵注入渲染管线。
-        vkContext.DrawFrame(view, proj,camera.Position); 
+        vkContext.DrawFrame(view, proj,camera.Position,lightDir, ambientStrength, specularStrength); 
     }
     
     vkDeviceWaitIdle(vkContext.GetDevice()); 

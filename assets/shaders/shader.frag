@@ -13,6 +13,10 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     vec3 lightDir;
     vec3 viewPos;
+
+    // 接受动态参数
+    float ambientStrength;
+    float specularStrength;
 } ubo;
 // Combined Image Sampler for texture reading.
 // 组合图像采样器，用于读取纹理像素 (占用 binding 1 槽位)。
@@ -25,7 +29,7 @@ void main() {
     vec3 textureColor = texture(texSampler, fragTexCoord).rgb * fragColor;
 
     // Ambient component
-    float ambientStrength = 0.5;
+    float ambientStrength = ubo.ambientStrength;
     vec3 ambient = ambientStrength * textureColor;
 
     // Diffuse component
@@ -35,7 +39,7 @@ void main() {
     vec3 diffuse = diff * textureColor;
 
     // Specular component
-    float specularStrength = 0.5;
+    float specularStrength = ubo.specularStrength;
     vec3 viewDir = normalize(ubo.viewPos - fragPos);
     vec3 reflectDir = reflect(-lightDir, norm);
     float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);

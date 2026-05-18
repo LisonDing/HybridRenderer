@@ -8,6 +8,8 @@ layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     vec3 lightDir;
     vec3 viewPos;
+    float ambientStrength;
+    float specularStrength;
 } ubo;
 
 // Input vertex attributes.
