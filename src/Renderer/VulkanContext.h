@@ -172,7 +172,7 @@ public:
 
     // --- Depth Testing & Blending ---
     void CreateDepthResources();
-    void CreateColorResources(); // Helper to create the color image used for MSAA rendering.
+    // void CreateColorResources(); // Helper to create the color image used for MSAA rendering.
 
     // --- Model Loading & Asset Management ---
     void LoadModel();
@@ -220,9 +220,9 @@ private:
     // Sampling & MSAA
     // 采样与多重采样资源
     VkSampleCountFlagBits m_MsaaSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkImage               m_ColorImage = VK_NULL_HANDLE;
-    VkDeviceMemory        m_ColorImageMemory = VK_NULL_HANDLE;
-    VkImageView           m_ColorImageView = VK_NULL_HANDLE;
+    // VkImage               m_ColorImage = VK_NULL_HANDLE;
+    // VkDeviceMemory        m_ColorImageMemory = VK_NULL_HANDLE;
+    // VkImageView           m_ColorImageView = VK_NULL_HANDLE;
 
     // Pipeline & Rendering
     // 渲染管线相关资源
@@ -292,6 +292,26 @@ private:
     VkPipelineLayout m_PostProcessPipelineLayout = VK_NULL_HANDLE;
     VkPipeline       m_PostProcessPipeline = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> m_PostProcessDescriptorSets;
+
+    // G-Buffer Resources for Deferred Shading
+    // 延迟渲染的 G-Buffer 
+    // 存储世界坐标 需要高精度格式以避免精度损失
+    VkImage        m_GBufferPositionImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_GBufferPositionImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_GBufferPositionImageView = VK_NULL_HANDLE;
+    VkFormat       m_GBufferPositionFormat = VK_FORMAT_R16G16B16A16_SFLOAT; // 高精度位置格式
+    // 存储法线 需要高精度格式以避免精度损失
+    VkImage        m_GBufferNormalImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_GBufferNormalImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_GBufferNormalImageView = VK_NULL_HANDLE;
+    VkFormat       m_GBufferNormalFormat = VK_FORMAT_R16G16B16A16_SFLOAT; // 高精度法线格式
+    // 存储颜色与其他属性 8 位格式足够
+    VkImage        m_GBufferAlbedoImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_GBufferAlbedoImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_GBufferAlbedoImageView = VK_NULL_HANDLE;
+    VkFormat       m_GBufferAlbedoFormat = VK_FORMAT_R8G8B8A8_UNORM; // 颜色格式
+    // 通用采样器
+    VkSampler      m_GBufferSampler = VK_NULL_HANDLE;
 };
 
 } // namespace Renderer

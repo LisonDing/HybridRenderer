@@ -1,6 +1,8 @@
 // STB_IMAGE_IMPLEMENTATION must be defined in exactly ONE .cpp file.
 // STB_IMAGE_IMPLEMENTATION 宏必须且只能在一个 .cpp 文件中被定义。
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #define TINYOBJLOADER_IMPLEMENTATION
@@ -264,21 +266,54 @@ void VulkanContext::CreateImageViews() {
 }
 
 void VulkanContext::CreateRenderPass() {
-    // Color attachment description.
-    // 颜色附件描述。
-    VkAttachmentDescription colorAttachment{};
-    // colorAttachment.format = m_SwapchainImageFormat;
-    colorAttachment.format = m_OffscreenFormat; // 应用离屏处理
-    colorAttachment.samples = m_MsaaSamples; 
+    // Positon G-Buffer
+    VkAttachmentDescription posAttachment{};
+    posAttachment.format = m_GBufferPositionFormat;
+    posAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    posAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    posAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    posAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    posAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    posAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    posAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    // Normal G-Buffer
+    VkAttachmentDescription normalAttachment{};
+    normalAttachment.format = m_GBufferNormalFormat;
+    normalAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    normalAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    normalAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    normalAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    normalAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    normalAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    normalAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    // Albedo G-Buffer
+    VkAttachmentDescription albedoAttachment{};
+    albedoAttachment.format = m_GBufferAlbedoFormat;
+    albedoAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    albedoAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    albedoAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    albedoAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    albedoAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    albedoAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    albedoAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; 
+    // // Color attachment description.
+    // // 颜色附件描述。
+    // VkAttachmentDescription colorAttachment{};
+    // // colorAttachment.format = m_SwapchainImageFormat;
+    // colorAttachment.format = m_OffscreenFormat; // 应用离屏处理
+    // colorAttachment.samples = m_MsaaSamples; 
     
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; 
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   
+    // colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; 
     
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;  // 保持为 COLOR_ATTACHMENT_OPTIMAL 以支持 MSAA 渲染后的正确解析和呈现。
+    // colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; 
+    // colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    
+    // colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;      
+    // colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;  // 保持为 COLOR_ATTACHMENT_OPTIMAL 以支持 MSAA 渲染后的正确解析和呈现。
 
     // New: Depth attachment description.
     // 新增：深度附件描述，用于每帧渲染前的深度清空操作。
@@ -292,41 +327,47 @@ void VulkanContext::CreateRenderPass() {
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     
-    // 颜色解析附件 （仅在 MSAA 启用时使用）
-    VkAttachmentDescription colorAttachmentResolve{};
-    // colorAttachmentResolve.format = m_SwapchainImageFormat;
-    colorAttachmentResolve.format = m_OffscreenFormat; // 应用离屏处理
-    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // Resolve attachment is always single-sampled / 解析附件始终为单采样。
-    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    // colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 解析后的图像直接用于呈现 
-    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 转换为只读布局以供后续的后处理着色器使用
+    // // 颜色解析附件 （仅在 MSAA 启用时使用）
+    // VkAttachmentDescription colorAttachmentResolve{};
+    // // colorAttachmentResolve.format = m_SwapchainImageFormat;
+    // colorAttachmentResolve.format = m_OffscreenFormat; // 应用离屏处理
+    // colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // Resolve attachment is always single-sampled / 解析附件始终为单采样。
+    // colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    // colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    // colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    // colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // // colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 解析后的图像直接用于呈现 
+    // colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 转换为只读布局以供后续的后处理着色器使用
 
-    // Attachment reference for subpass usage.
-    // 供子通道调用的附件引用。
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0; 
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; 
+    // // Attachment reference for subpass usage.
+    // // 供子通道调用的附件引用。
+    // VkAttachmentReference colorAttachmentRef{};
+    // colorAttachmentRef.attachment = 0; 
+    // colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; 
 
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1; // Index 1 in the attachments array / 位于附件数组的索引 1
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    // VkAttachmentReference depthAttachmentRef{};
+    // depthAttachmentRef.attachment = 1; // Index 1 in the attachments array / 位于附件数组的索引 1
+    // depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference colorAttachmentResolveRef{};
-    colorAttachmentResolveRef.attachment = 2; // Index 2 in the attachments array / 位于附件数组的索引 2
-    colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // Resolve attachment is used as a color attachment during the subpass / 解析附件在子通道中作为颜色附件使用
+    // VkAttachmentReference colorAttachmentResolveRef{};
+    // colorAttachmentResolveRef.attachment = 2; // Index 2 in the attachments array / 位于附件数组的索引 2
+    // colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // Resolve attachment is used as a color attachment during the subpass / 解析附件在子通道中作为颜色附件使用
 
+    // 子通道引用
+    VkAttachmentReference posRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference normalRef{1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference albedoRef{2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference colorReferences[] = {posRef, normalRef, albedoRef}; // G-Buffer 位置附件作为颜色输出
+    VkAttachmentReference depthRef{3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL}; // 深度附件引用
     // Subpass description.
     // 子通道描述。
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; 
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef; // Bind depth to subpass / 将深度附件绑定至子通道
-    subpass.pResolveAttachments = &colorAttachmentResolveRef; // Resolve attachment for MSAA / MSAA 的解析附件
+    subpass.colorAttachmentCount = 3;
+    subpass.pColorAttachments = colorReferences;
+    subpass.pDepthStencilAttachment = &depthRef; // Bind depth to subpass / 将深度附件绑定至子通道
+    // subpass.pResolveAttachments = &colorAttachmentResolveRef; // Resolve attachment for MSAA / MSAA 的解析附件
 
     // 子通道依赖 - 确保在子通道执行前，交换链图像已经准备好被写入（从外部队列转到当前子通道）。
     VkSubpassDependency dependency{};
@@ -337,7 +378,7 @@ void VulkanContext::CreateRenderPass() {
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT; // Ensure subpass waits for these stages / 确保子通道等待这些阶段
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT; // Wait for write access to color and depth attachments / 等待对颜色和深度附件的写访问
 
-    std::array<VkAttachmentDescription, 3> attachments = {colorAttachment, depthAttachment, colorAttachmentResolve};
+    std::array<VkAttachmentDescription, 4> attachments = {posAttachment, normalAttachment, albedoAttachment, depthAttachment};
 
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -443,11 +484,17 @@ void VulkanContext::CreateGraphicsPipeline() {
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = VK_FALSE; 
 
+    std::array<VkPipelineColorBlendAttachmentState, 3> blendAttachments = {
+        colorBlendAttachment, // Position G-Buffer
+        colorBlendAttachment, // Normal G-Buffer
+        colorBlendAttachment  // Albedo G-Buffer
+    };
+
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    colorBlending.attachmentCount = static_cast<uint32_t>(blendAttachments.size());
+    colorBlending.pAttachments = blendAttachments.data();
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1002,18 +1049,18 @@ VkSampleCountFlagBits VulkanContext::GetMaxUsableSampleCount() {
     return VK_SAMPLE_COUNT_1_BIT;
 }
 
-void VulkanContext::CreateColorResources() {
-    // VkFormat colorFormat = m_SwapchainImageFormat;
-    VkFormat colorFormat = m_OffscreenFormat;
+// void VulkanContext::CreateColorResources() {
+//     // VkFormat colorFormat = m_SwapchainImageFormat;
+//     VkFormat colorFormat = m_OffscreenFormat;
 
-    // Create an image specifically structured for MSAA rendering.
-    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, m_MsaaSamples, colorFormat,
-                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_ColorImage, m_ColorImageMemory);
+//     // Create an image specifically structured for MSAA rendering.
+//     CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, m_MsaaSamples, colorFormat,
+//                 VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+//                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_ColorImage, m_ColorImageMemory);
     
-    m_ColorImageView = CreateImageView(m_ColorImage, colorFormat, 1);
-    HR_LOG_INFO("VulkanContext: Color Resources created.");
-}
+//     m_ColorImageView = CreateImageView(m_ColorImage, colorFormat, 1);
+//     HR_LOG_INFO("VulkanContext: Color Resources created.");
+// }
 
 void VulkanContext::CreateDepthResources() {
     VkFormat depthFormat = FindDepthFormat();
@@ -1047,10 +1094,11 @@ void VulkanContext::CreateDepthResources() {
 
 void VulkanContext::CreateFramebuffers() {
     // 为 3D 渲染创建离屏帧缓冲 (只需 1 个)
-    std::array<VkImageView, 3> offscreenAttachments = {
-        m_ColorImageView,      // MSAA 颜色缓冲
-        m_DepthImageView,      // MSAA 深度缓冲
-        m_OffscreenImageView   // 降采样后存放最终 3D 画面的贴图！
+    std::array<VkImageView, 4> offscreenAttachments = {
+        m_GBufferPositionImageView, // 位置 G-Buffer
+        m_GBufferNormalImageView,   // 法线 G-Buffer
+        m_GBufferAlbedoImageView,   // 反照率 G-Buffer
+        m_DepthImageView            // 深度缓冲
     };
 
     VkFramebufferCreateInfo offscreenFbInfo{};
@@ -1084,7 +1132,7 @@ void VulkanContext::CreateFramebuffers() {
             HR_LOG_ERROR("VulkanContext: Failed to create Swapchain Framebuffer!");
         }
     }
-    HR_LOG_INFO("VulkanContext: Offscreen & Swapchain Framebuffers created.");
+    HR_LOG_INFO("VulkanContext: G-Buffer & Swapchain Framebuffers created.");
 }
 
 void VulkanContext::CreateVertexBuffer() {
@@ -1220,9 +1268,9 @@ void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& 
 void VulkanContext::CreateDescriptorPool() {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size());
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 2);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 2); // 3D 渲染和后处理都需要采样器描述符
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 4); // 3D 渲染和后处理都需要采样器描述符
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1298,21 +1346,36 @@ void VulkanContext::CreateDescriptorSets() {
 
     // 将离屏贴图绑定给后处理管线
     for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = m_OffscreenImageView;
-        imageInfo.sampler = m_OffscreenSampler;
+        std::array<VkDescriptorImageInfo, 3> imageInfos{};
+        imageInfos[0] = {m_GBufferSampler, m_GBufferPositionImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}; // 位置 G-Buffer
+        imageInfos[1] = {m_GBufferSampler, m_GBufferNormalImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};   // 法线 G-Buffer
+        imageInfos[2] = {m_GBufferSampler, m_GBufferAlbedoImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};   // 反照率 G-Buffer
 
-        VkWriteDescriptorSet descriptorWrite{};
-        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet = m_PostProcessDescriptorSets[i];
-        descriptorWrite.dstBinding = 0;
-        descriptorWrite.dstArrayElement = 0;
-        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrite.descriptorCount = 1;
-        descriptorWrite.pImageInfo = &imageInfo;
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = m_UniformBuffers[i];
+        bufferInfo.offset = 0;
+        bufferInfo.range = sizeof(UniformBufferObject);
 
-        vkUpdateDescriptorSets(m_Device, 1, &descriptorWrite, 0, nullptr);
+        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        for (size_t j = 0; j < 3; j++) {
+            descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[j].dstSet = m_PostProcessDescriptorSets[i];
+            descriptorWrites[j].dstBinding = j;
+            descriptorWrites[j].dstArrayElement = 0;
+            descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[j].descriptorCount = 1;
+            descriptorWrites[j].pImageInfo = &imageInfos[j];
+        }
+
+        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[3].dstSet = m_PostProcessDescriptorSets[i];
+        descriptorWrites[3].dstBinding = 3;
+        descriptorWrites[3].dstArrayElement = 0;
+        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrites[3].descriptorCount = 1;
+        descriptorWrites[3].pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
     }
 }
 
@@ -1425,28 +1488,42 @@ void VulkanContext::InitImGui(struct GLFWwindow* window) {
 }
 
 void VulkanContext::CreateOffscreenResources() {
-    // 创建一个专门用于离屏渲染的颜色附件，格式与交换链一致。
-    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, m_OffscreenFormat,
+    // Position G-Buffer
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, m_GBufferPositionFormat,
                 VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_OffscreenImage, m_OffscreenImageMemory);
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_GBufferPositionImage, m_GBufferPositionImageMemory);
     
-    m_OffscreenImageView = CreateImageView(m_OffscreenImage, m_OffscreenFormat, 1);
+    m_GBufferPositionImageView = CreateImageView(m_GBufferPositionImage, m_GBufferPositionFormat, 1);
 
-    // 图像采样器
+    // Normal G-Buffer
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, m_GBufferNormalFormat,
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_GBufferNormalImage, m_GBufferNormalImageMemory);
+
+    m_GBufferNormalImageView = CreateImageView(m_GBufferNormalImage, m_GBufferNormalFormat, 1);
+
+    // Albedo G-Buffer
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, m_GBufferAlbedoFormat,
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_GBufferAlbedoImage, m_GBufferAlbedoImageMemory); 
+    
+    m_GBufferAlbedoImageView = CreateImageView(m_GBufferAlbedoImage, m_GBufferAlbedoFormat, 1);
+
+    // 通用图像采样器
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
-    if (vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_OffscreenSampler) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to create offscreen sampler!");
+    if (vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_GBufferSampler) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create G-Buffer sampler!");
     }
-    HR_LOG_INFO("VulkanContext: Offscreen color resources created.");
+    HR_LOG_INFO("VulkanContext: G-Buffer Resources allocated sucessfully.");
 }
 
 void VulkanContext::CreatePostProcessRenderPass() {
@@ -1496,18 +1573,34 @@ void VulkanContext::CreatePostProcessRenderPass() {
 }
 
 void VulkanContext::CreatePostProcessPipeline() {
-    // 1. 创建描述符布局 (只需接收一张贴图)
-    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 0;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    // // 1. 创建描述符布局 (只需接收一张贴图)
+    // VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+    // samplerLayoutBinding.binding = 0;
+    // samplerLayoutBinding.descriptorCount = 1;
+    // samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    // samplerLayoutBinding.pImmutableSamplers = nullptr;
+    // samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    
+    // 3个G-Buffer采样器和1个离屏采样器共4个绑定
+    std::array<VkDescriptorSetLayoutBinding, 4> blndings{};
+    for (uint32_t i = 0; i < 3; i++) {
+        blndings[i].binding = i;
+        blndings[i].descriptorCount = 1;
+        blndings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        blndings[i].pImmutableSamplers = nullptr;
+        blndings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+
+    blndings[3].binding = 3;
+    blndings[3].descriptorCount = 1;
+    blndings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    blndings[3].pImmutableSamplers = nullptr;
+    blndings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;  
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &samplerLayoutBinding;
+    layoutInfo.bindingCount = static_cast<uint32_t>(blndings.size());
+    layoutInfo.pBindings = blndings.data();
     vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_PostProcessDescriptorSetLayout);
 
     // 2. 配置推送常量 (Push Constants) 接收 UI 参数
@@ -1612,9 +1705,11 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
 
     // Define clear values for both color and depth attachments.
     // 为颜色与深度附件分别定义渲染起始的清空值。
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {{0.05f, 0.05f, 0.05f, 1.0f}};
-    clearValues[1].depthStencil = {1.0f, 0};
+    std::array<VkClearValue, 4> clearValues{};
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // Position G-Buffer
+    clearValues[1].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; // Normal G-Buffer
+    clearValues[2].color = {{0.05f, 0.05f, 0.05f, 1.0f}}; // Albedo G-Buffer
+    clearValues[3].depthStencil = {1.0f, 0};
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
     renderPassInfo.pClearValues = clearValues.data();
 
@@ -1704,6 +1799,24 @@ void VulkanContext::Cleanup() {
         vkDeviceWaitIdle(m_Device); 
     }
 
+    // offscreen 资源销毁
+    if (m_GBufferSampler != VK_NULL_HANDLE) vkDestroySampler(m_Device, m_GBufferSampler, nullptr);
+    if (m_GBufferPositionImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_GBufferPositionImageView, nullptr);
+    if (m_GBufferPositionImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_Device, m_GBufferPositionImage, nullptr);
+        vkFreeMemory(m_Device, m_GBufferPositionImageMemory, nullptr);
+    }
+    if (m_GBufferNormalImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_GBufferNormalImageView, nullptr);
+    if (m_GBufferNormalImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_Device, m_GBufferNormalImage, nullptr);
+        vkFreeMemory(m_Device, m_GBufferNormalImageMemory, nullptr);
+    }
+    if (m_GBufferAlbedoImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_GBufferAlbedoImageView, nullptr);
+    if (m_GBufferAlbedoImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_Device, m_GBufferAlbedoImage, nullptr);
+        vkFreeMemory(m_Device, m_GBufferAlbedoImageMemory, nullptr);
+    }
+
     // ImGui Cleanup
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
@@ -1753,12 +1866,12 @@ void VulkanContext::Cleanup() {
         HR_LOG_INFO("VulkanContext: Depth Resources destroyed.");
     }
 
-    if (m_ColorImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_ColorImageView, nullptr);
-    if (m_ColorImage != VK_NULL_HANDLE) {
-        vkDestroyImage(m_Device, m_ColorImage, nullptr);
-        vkFreeMemory(m_Device, m_ColorImageMemory, nullptr);
-        HR_LOG_INFO("VulkanContext: MASS Color Resources destroyed.");
-    }
+    // if (m_ColorImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_ColorImageView, nullptr);
+    // if (m_ColorImage != VK_NULL_HANDLE) {
+    //     vkDestroyImage(m_Device, m_ColorImage, nullptr);
+    //     vkFreeMemory(m_Device, m_ColorImageMemory, nullptr);
+    //     HR_LOG_INFO("VulkanContext: MASS Color Resources destroyed.");
+    // }
 
     if (m_GraphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
