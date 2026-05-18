@@ -13,8 +13,8 @@
 
 // Constants and Global Camera State
 // 常量与全局摄像机状态 (由于 GLFW C-API 回调的限制，需要使用全局或静态变量)
-const uint32_t WIDTH = 1280;
-const uint32_t HEIGHT = 720;
+const uint32_t WIDTH = 800;
+const uint32_t HEIGHT = 600;
 
 // 在 WIDTH 和 HEIGHT 下方，替换原有的 Camera 状态
 Core::Camera camera(glm::vec3(0.0f, 0.0f, 0.0f), 4.0f); // 目标点在原点，距离 4.0
@@ -163,7 +163,7 @@ int main() {
 
     vkContext.PickPhysicalDevice(); // 选择物理设备（GPU）
     vkContext.CreateLogicalDevice(); // 创建逻辑设备与获取队列
-    
+
     int fbWidth, fbHeight;
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
     vkContext.CreateSwapchain(fbWidth, fbHeight); // 创建交换链与相关图像资源
@@ -173,6 +173,8 @@ int main() {
     vkContext.CreateGraphicsPipeline(); // 创建图形管线，绑定着色器与固定功能状态
     vkContext.CreateColorResources(); // 创建多重采样用的颜色资源
     vkContext.CreateDepthResources(); // 创建深度缓冲区资源
+    vkContext.CreateOffscreenResources(); // 创建离屏渲染资源（帧缓冲、图像、视图）
+    vkContext.CreatePostProcessRenderPass(); // 创建后处理专用的渲染
     vkContext.CreateFramebuffers(); // 创建帧缓冲区，绑定交换链图像视图与深度视图
 
     // vkContext.InitImGui(window); // 初始化 ImGui，创建专用描述符池并绑定 Vulkan 与 GLFW
@@ -198,6 +200,7 @@ int main() {
     vkContext.CreateVertexBuffer(); // 创建顶点缓冲区并上传顶点数据
     vkContext.CreateIndexBuffer(); // 创建索引缓冲区并上传索引数据
     vkContext.CreateUniformBuffers(); // 创建统一缓冲区，用于存储 MVP 矩阵等动态数据
+    vkContext.CreatePostProcessPipeline(); // 创建后处理管线，绑定后处理着色器与状态配置
     vkContext.CreateDescriptorPool(); // 创建描述符池，管理描述符集的分配
     vkContext.CreateDescriptorSets(); // 创建描述符集，绑定纹理与 uniform 数据，必须在纹理资源创建完成后进行绑定
 
@@ -205,6 +208,9 @@ int main() {
     glm::vec3 lightDir = glm::vec3(5.0f, 10.0f, 3.0f); // 定义一个固定的光照方向
     float ambientStrength = 0.5f; // 环境光强度
     float specularStrength = 0.5f; // 镜面反射强
+    float exposure = 1.0f;
+    float vignetteStrength = 0.5f;
+
     // ==========================================
     // Phase 4: Main Execution Loop
     // 阶段 4：引擎主执行循环
@@ -231,7 +237,8 @@ int main() {
         ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_Once);
 
         ImGui::Begin("Control Panel");
-        ImGui::Text("Hybrid Renderer Engine");
+        // ImGui::Text("Hybrid Renderer Engine");
+        // ImGui::Separator();
         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
         ImGui::Separator();
         // 实时渲染参数滑块
@@ -239,6 +246,11 @@ int main() {
         ImGui::SliderFloat("Light Dir", &lightDir.x, -10.0f, 10.0f);
         ImGui::SliderFloat("Ambient Strength", &ambientStrength, 0.0f, 1.0f);
         ImGui::SliderFloat("Specular Strength", &specularStrength, 0.0f, 2.0f);
+        ImGui::Separator();
+        //
+        ImGui::Text("Post-Processing");
+        ImGui::SliderFloat("Exposure", &exposure, 0.1f, 5.0f);
+        ImGui::SliderFloat("Vignette", &vignetteStrength, 0.0f, 1.0f);
 
         ImGui::End();
         // 发送UI数据到GPU并渲染
@@ -252,7 +264,7 @@ int main() {
 
         // Inject matrices into the rendering pipeline.
         // 将矩阵注入渲染管线。
-        vkContext.DrawFrame(view, proj,camera.Position,lightDir, ambientStrength, specularStrength); 
+        vkContext.DrawFrame(view, proj,camera.Position,lightDir, ambientStrength, specularStrength,exposure, vignetteStrength); 
     }
     
     vkDeviceWaitIdle(vkContext.GetDevice()); 

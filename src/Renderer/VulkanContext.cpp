@@ -267,7 +267,8 @@ void VulkanContext::CreateRenderPass() {
     // Color attachment description.
     // 颜色附件描述。
     VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = m_SwapchainImageFormat;
+    // colorAttachment.format = m_SwapchainImageFormat;
+    colorAttachment.format = m_OffscreenFormat; // 应用离屏处理
     colorAttachment.samples = m_MsaaSamples; 
     
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;   
@@ -293,14 +294,16 @@ void VulkanContext::CreateRenderPass() {
     
     // 颜色解析附件 （仅在 MSAA 启用时使用）
     VkAttachmentDescription colorAttachmentResolve{};
-    colorAttachmentResolve.format = m_SwapchainImageFormat;
+    // colorAttachmentResolve.format = m_SwapchainImageFormat;
+    colorAttachmentResolve.format = m_OffscreenFormat; // 应用离屏处理
     colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // Resolve attachment is always single-sampled / 解析附件始终为单采样。
     colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 解析后的图像直接用于呈现
+    // colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 解析后的图像直接用于呈现 
+    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // 转换为只读布局以供后续的后处理着色器使用
 
     // Attachment reference for subpass usage.
     // 供子通道调用的附件引用。
@@ -1000,7 +1003,8 @@ VkSampleCountFlagBits VulkanContext::GetMaxUsableSampleCount() {
 }
 
 void VulkanContext::CreateColorResources() {
-    VkFormat colorFormat = m_SwapchainImageFormat;
+    // VkFormat colorFormat = m_SwapchainImageFormat;
+    VkFormat colorFormat = m_OffscreenFormat;
 
     // Create an image specifically structured for MSAA rendering.
     CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, m_MsaaSamples, colorFormat,
@@ -1042,32 +1046,45 @@ void VulkanContext::CreateDepthResources() {
 
 
 void VulkanContext::CreateFramebuffers() {
+    // 为 3D 渲染创建离屏帧缓冲 (只需 1 个)
+    std::array<VkImageView, 3> offscreenAttachments = {
+        m_ColorImageView,      // MSAA 颜色缓冲
+        m_DepthImageView,      // MSAA 深度缓冲
+        m_OffscreenImageView   // 降采样后存放最终 3D 画面的贴图！
+    };
+
+    VkFramebufferCreateInfo offscreenFbInfo{};
+    offscreenFbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    offscreenFbInfo.renderPass = m_RenderPass; // 绑定 3D RenderPass
+    offscreenFbInfo.attachmentCount = static_cast<uint32_t>(offscreenAttachments.size());
+    offscreenFbInfo.pAttachments = offscreenAttachments.data();
+    offscreenFbInfo.width = m_SwapchainExtent.width;
+    offscreenFbInfo.height = m_SwapchainExtent.height;
+    offscreenFbInfo.layers = 1;
+
+    if (vkCreateFramebuffer(m_Device, &offscreenFbInfo, nullptr, &m_OffscreenFramebuffer) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create Offscreen Framebuffer!");
+    }
+
+    // 2. 为后处理创建交换链帧缓冲 (对应屏幕的 3 张图像)
     m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size());
-
     for (size_t i = 0; i < m_SwapchainImageViews.size(); i++) {
-        // Bind both the color and depth image views to the current framebuffer.
-        // 将颜色视图与深度视图一同绑定至当前帧缓冲。
-        std::array<VkImageView, 3> attachments = {
-            m_ColorImageView,
-            m_DepthImageView,
-            m_SwapchainImageViews[i],
-        };
+        VkImageView attachment[] = { m_SwapchainImageViews[i] };
 
-        VkFramebufferCreateInfo framebufferInfo{};
-        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebufferInfo.renderPass = m_RenderPass; 
-        framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-        framebufferInfo.pAttachments = attachments.data();
-        framebufferInfo.width = m_SwapchainExtent.width;
-        framebufferInfo.height = m_SwapchainExtent.height;
-        framebufferInfo.layers = 1;
+        VkFramebufferCreateInfo fbInfo{};
+        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbInfo.renderPass = m_PostProcessRenderPass; // 绑定后处理 RenderPass
+        fbInfo.attachmentCount = 1;
+        fbInfo.pAttachments = attachment;
+        fbInfo.width = m_SwapchainExtent.width;
+        fbInfo.height = m_SwapchainExtent.height;
+        fbInfo.layers = 1;
 
-        if (vkCreateFramebuffer(m_Device, &framebufferInfo, nullptr, &m_SwapchainFramebuffers[i]) != VK_SUCCESS) {
-            HR_LOG_ERROR("VulkanContext: Failed to create framebuffer!");
-            return;
+        if (vkCreateFramebuffer(m_Device, &fbInfo, nullptr, &m_SwapchainFramebuffers[i]) != VK_SUCCESS) {
+            HR_LOG_ERROR("VulkanContext: Failed to create Swapchain Framebuffer!");
         }
     }
-    HR_LOG_INFO("VulkanContext: Framebuffers created.");
+    HR_LOG_INFO("VulkanContext: Offscreen & Swapchain Framebuffers created.");
 }
 
 void VulkanContext::CreateVertexBuffer() {
@@ -1205,13 +1222,13 @@ void VulkanContext::CreateDescriptorPool() {
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size());
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size());
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 2); // 3D 渲染和后处理都需要采样器描述符
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(m_SwapchainImages.size());
+    poolInfo.maxSets = static_cast<uint32_t>(m_SwapchainImages.size() * 2);
 
     if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to create descriptor pool!");
@@ -1264,6 +1281,38 @@ void VulkanContext::CreateDescriptorSets() {
         descriptorWrites[1].pImageInfo = &imageInfo;
 
         vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+    }
+
+    // 后期处理的描述符集
+    std::vector<VkDescriptorSetLayout> ppLayouts(m_SwapchainImages.size(), m_PostProcessDescriptorSetLayout);
+    VkDescriptorSetAllocateInfo ppAllocInfo{};
+    ppAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ppAllocInfo.descriptorPool = m_DescriptorPool;
+    ppAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_SwapchainImages.size());
+    ppAllocInfo.pSetLayouts = ppLayouts.data();
+
+    m_PostProcessDescriptorSets.resize(m_SwapchainImages.size());
+    if (vkAllocateDescriptorSets(m_Device, &ppAllocInfo, m_PostProcessDescriptorSets.data()) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to allocate Post-Process Descriptor Sets!");
+    }
+
+    // 将离屏贴图绑定给后处理管线
+    for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = m_OffscreenImageView;
+        imageInfo.sampler = m_OffscreenSampler;
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = m_PostProcessDescriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(m_Device, 1, &descriptorWrite, 0, nullptr);
     }
 }
 
@@ -1375,7 +1424,168 @@ void VulkanContext::InitImGui(struct GLFWwindow* window) {
 
 }
 
-void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float ambientStrength, float specularStrength) {
+void VulkanContext::CreateOffscreenResources() {
+    // 创建一个专门用于离屏渲染的颜色附件，格式与交换链一致。
+    CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, m_OffscreenFormat,
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_OffscreenImage, m_OffscreenImageMemory);
+    
+    m_OffscreenImageView = CreateImageView(m_OffscreenImage, m_OffscreenFormat, 1);
+
+    // 图像采样器
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.anisotropyEnable = VK_FALSE;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+    if (vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_OffscreenSampler) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create offscreen sampler!");
+    }
+    HR_LOG_INFO("VulkanContext: Offscreen color resources created.");
+}
+
+void VulkanContext::CreatePostProcessRenderPass() {
+    // 将图像输入到 Swapchain 的渲染流程中，必须先定义一个 Render Pass 来描述这个过程。
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = m_SwapchainImageFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    
+    // 叠加 ImGui 时需要保持颜色附件的布局为 COLOR_ATTACHMENT_OPTIMAL，以确保正确的渲染结果。
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; 
+
+    VkAttachmentReference colorAttachmentRef{};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &colorAttachment;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+    renderPassInfo.dependencyCount = 1;
+    renderPassInfo.pDependencies = &dependency;
+
+    if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_PostProcessRenderPass) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create Post-Process Render Pass!");
+    }
+    HR_LOG_INFO("VulkanContext: Post-Process Render Pass created.");
+}
+
+void VulkanContext::CreatePostProcessPipeline() {
+    // 1. 创建描述符布局 (只需接收一张贴图)
+    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.binding = 0;
+    samplerLayoutBinding.descriptorCount = 1;
+    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerLayoutBinding.pImmutableSamplers = nullptr;
+    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &samplerLayoutBinding;
+    vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_PostProcessDescriptorSetLayout);
+
+    // 2. 配置推送常量 (Push Constants) 接收 UI 参数
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PostProcessParams);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &m_PostProcessDescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+    vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PostProcessPipelineLayout);
+
+    // 3. 基础管线配置
+    auto vertShaderCode = ReadFile("bin/shaders/post_process.vert.spv");
+    auto fragShaderCode = ReadFile("bin/shaders/post_process.frag.spv");
+    VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
+    VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+
+    VkPipelineShaderStageCreateInfo shaderStages[] = {
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vertShaderModule, "main", nullptr},
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragShaderModule, "main", nullptr}
+    };
+
+    // 全屏三角形不需要读取顶点缓冲数据
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    // 视口与裁剪
+    VkViewport viewport{0.0f, 0.0f, (float)m_SwapchainExtent.width, (float)m_SwapchainExtent.height, 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, m_SwapchainExtent};
+    VkPipelineViewportStateCreateInfo viewportState{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, nullptr, 0, 1, &viewport, 1, &scissor};
+
+    // 光栅化与多重采样 (全屏 2D 不需要 MSAA 和背面剔除)
+    VkPipelineRasterizationStateCreateInfo rasterizer{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, nullptr, 0, VK_FALSE, VK_FALSE, VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE, VK_FALSE, 0.0f, 0.0f, 0.0f, 1.0f};
+    VkPipelineMultisampleStateCreateInfo multisampling{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, nullptr, 0, VK_SAMPLE_COUNT_1_BIT, VK_FALSE, 0.0f, nullptr, VK_FALSE, VK_FALSE};
+    
+    // 深度测试完全关闭
+    VkPipelineDepthStencilStateCreateInfo depthStencil{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, nullptr, 0, VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL, VK_FALSE, VK_FALSE};
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{VK_FALSE, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+    VkPipelineColorBlendStateCreateInfo colorBlending{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, nullptr, 0, VK_FALSE, VK_LOGIC_OP_COPY, 1, &colorBlendAttachment, {0.0f, 0.0f, 0.0f, 0.0f}};
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.layout = m_PostProcessPipelineLayout;
+    
+    // 绑定专门的后处理 RenderPass
+    pipelineInfo.renderPass = m_PostProcessRenderPass; 
+    pipelineInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_PostProcessPipeline) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create Post-Process Pipeline!");
+    }
+
+    vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
+    HR_LOG_INFO("VulkanContext: Post-Process Pipeline created.");
+}
+
+void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float ambientStrength, float specularStrength, float exposure, float vignette) {
     // Wait for the previous frame to finish GPU execution.
     // 等待上一帧的 GPU 渲染执行完毕。
     vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
@@ -1391,10 +1601,12 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(m_CommandBuffer, &beginInfo);
 
+    // Pass 1: 离屏渲染 3D 场景到 m_OffscreenFramebuffer
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = m_RenderPass;
-    renderPassInfo.framebuffer = m_SwapchainFramebuffers[imageIndex]; 
+    // renderPassInfo.framebuffer = m_SwapchainFramebuffers[imageIndex]; 
+    renderPassInfo.framebuffer = m_OffscreenFramebuffer; // 首先绑定离屏帧缓冲进行渲染
     renderPassInfo.renderArea.offset = {0, 0};
     renderPassInfo.renderArea.extent = m_SwapchainExtent;
 
@@ -1403,37 +1615,50 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color = {{0.05f, 0.05f, 0.05f, 1.0f}};
     clearValues[1].depthStencil = {1.0f, 0};
-
     renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
     renderPassInfo.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(m_CommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
     vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
 
     VkBuffer vertexBuffers[] = {m_VertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
-
     vkCmdBindIndexBuffer(m_CommandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[imageIndex], 0, nullptr);
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(m_SwapchainExtent.width);
-    viewport.height = static_cast<float>(m_SwapchainExtent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(m_CommandBuffer, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = m_SwapchainExtent;
-    vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
-
     vkCmdDrawIndexed(m_CommandBuffer, static_cast<uint32_t>(m_Indices.size()), 1, 0, 0, 0);
+
+    // 结束离屏渲染 Pass，开始后处理 Pass
+    vkCmdEndRenderPass(m_CommandBuffer);
+
+    // Pass 2: 后处理，将离屏渲染的结果绘制到 Swapchain 上
+    VkRenderPassBeginInfo ppRenderPassInfo{};
+    ppRenderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    ppRenderPassInfo.renderPass = m_PostProcessRenderPass;
+    ppRenderPassInfo.framebuffer = m_SwapchainFramebuffers[imageIndex]; // 【关键】画到屏幕交换链
+    ppRenderPassInfo.renderArea.offset = {0, 0};
+    ppRenderPassInfo.renderArea.extent = m_SwapchainExtent;
+
+    // 后处理 Pass 只需要清空颜色附件，保持深度附件不变以确保 UI 正确叠加。
+    VkClearValue ppClearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+    ppRenderPassInfo.clearValueCount = 1;
+    ppRenderPassInfo.pClearValues = &ppClearColor;
+
+    vkCmdBeginRenderPass(m_CommandBuffer, &ppRenderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PostProcessPipeline);
+    // 绑定装有 3D 画面贴图的描述符
+    vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PostProcessPipelineLayout, 0, 1, &m_PostProcessDescriptorSets[imageIndex], 0, nullptr);
+
+    // 将 UI 参数通过推送常量传递给后处理着色器
+    PostProcessParams params = { exposure, vignette };
+    vkCmdPushConstants(m_CommandBuffer, m_PostProcessPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PostProcessParams), &params);
+
+    // 绘制一个覆盖全屏的三角形，片段着色器会根据绑定的离屏贴图进行采样并应用后处理效果。
+    vkCmdDraw(m_CommandBuffer, 3, 1, 0, 0);
+
+    // Pass 3: 叠加 ImGui UI
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_CommandBuffer);
+
     vkCmdEndRenderPass(m_CommandBuffer);
     if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to record command buffer!");

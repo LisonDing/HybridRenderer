@@ -70,6 +70,12 @@ struct Vertex {
     }
 };
 
+// 推送常量结构体
+struct PostProcessParams {
+    alignas(4) float exposure; // 曝光控制
+    alignas(4) float vignetteStrength; // 暗角强度
+};
+
 } // namespace Renderer （临时闭合，注入std）
 
 namespace std {
@@ -174,8 +180,13 @@ public:
     // --- ImGui Integration ---
     void InitImGui (struct GLFWwindow* window);
 
+    // --- Offscreen Rendering & Post-Processing ---
+    void CreateOffscreenResources(); 
+    void CreatePostProcessRenderPass(); 
+    void CreatePostProcessPipeline();
+
     // --- Execution ---
-    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float ambientStrength, float specularStrength); 
+    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float ambientStrength, float specularStrength, float exposure, float vignette); 
     void Cleanup();
 
 private:
@@ -265,6 +276,22 @@ private:
     std::vector<VkBuffer>       m_UniformBuffers;
     std::vector<VkDeviceMemory> m_UniformBuffersMemory;
     std::vector<void*>          m_UniformBuffersMapped;
+
+    // Offscreen & Post-Processing Resources
+    // 离屏渲染与后处理资源
+    VkFormat m_OffscreenFormat = VK_FORMAT_R8G8B8A8_UNORM; // 离屏渲染目标格式
+    // 离屏图像、内存与采样器
+    VkImage        m_OffscreenImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_OffscreenImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_OffscreenImageView = VK_NULL_HANDLE;
+    VkSampler      m_OffscreenSampler = VK_NULL_HANDLE;
+    VkFramebuffer  m_OffscreenFramebuffer = VK_NULL_HANDLE; // 离屏渲染帧缓冲
+    // 后处理管线与描述符
+    VkRenderPass     m_PostProcessRenderPass = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_PostProcessDescriptorSetLayout = VK_NULL_HANDLE;
+    VkPipelineLayout m_PostProcessPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline       m_PostProcessPipeline = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_PostProcessDescriptorSets;
 };
 
 } // namespace Renderer
