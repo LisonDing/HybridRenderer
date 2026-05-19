@@ -1,7 +1,8 @@
 #pragma once
 
 #include "glm/fwd.hpp"
-#include "imgui_impl_glfw.h"
+// #include "imgui_impl_glfw.h"
+#include <functional>
 #include <sys/types.h>
 #include <vulkan/vulkan.h>
 #include <vector>
@@ -133,6 +134,10 @@ public:
     void CreateLogicalDevice();
     void SetSurface(VkSurfaceKHR surface) { m_Surface = surface; }
     VkInstance GetInstance() const { return m_Instance; }
+    VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
+    VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
+    uint32_t GetGraphicsQueueFamily() { return FindQueueFamilies(m_PhysicalDevice).graphicsFamily.value(); }
+    VkRenderPass GetPostProcessRenderPass() const { return m_PostProcessRenderPass; }
     VkDevice GetDevice() const { return m_Device; }
 
     // --- Swapchain & Pipeline ---
@@ -178,7 +183,8 @@ public:
     void LoadModel();
 
     // --- ImGui Integration ---
-    void InitImGui (struct GLFWwindow* window);
+    // void InitImGui (struct GLFWwindow* window);
+    // 已迁移至 ImGuiLayer 类，专门处理 UI 相关的 Vulkan 资源与初始化。
 
     // --- Offscreen Rendering & Post-Processing ---
     void CreateOffscreenResources(); 
@@ -186,7 +192,7 @@ public:
     void CreatePostProcessPipeline();
 
     // --- Execution ---
-    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float ambientStrength, float specularStrength, float exposure, float vignette); 
+    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float ambientStrength, float specularStrength, float exposure, float vignette,std::function<void(VkCommandBuffer)> uiRenderCallback = nullptr); 
     void Cleanup();
 
 private:
@@ -271,7 +277,7 @@ private:
     // 描述符与统一缓冲资源
     VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool      m_DescriptorPool = VK_NULL_HANDLE;
-    VkDescriptorPool      m_ImGuiDescriptorPool = VK_NULL_HANDLE; // 专门为 ImGui 创建的描述符池
+    // VkDescriptorPool      m_ImGuiDescriptorPool = VK_NULL_HANDLE; // 专门为 ImGui 创建的描述符池
     std::vector<VkDescriptorSet> m_DescriptorSets;
     std::vector<VkBuffer>       m_UniformBuffers;
     std::vector<VkDeviceMemory> m_UniformBuffersMemory;

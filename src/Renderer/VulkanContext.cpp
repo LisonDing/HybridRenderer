@@ -14,9 +14,9 @@
 #include <string>
 #include <unordered_map>
 
-#include <imgui.h>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_vulkan.h>
+// #include <imgui.h>
+// #include <backends/imgui_impl_glfw.h>
+// #include <backends/imgui_impl_vulkan.h>
 
 #include <GLFW/glfw3.h>
 
@@ -1426,66 +1426,66 @@ void VulkanContext::CreateSyncObjects() {
     HR_LOG_INFO("VulkanContext: Synchronization objects created.");
 }
 
-void VulkanContext::InitImGui(struct GLFWwindow* window) {
-    // ImGUI 专属描述符池
-    VkDescriptorPoolSize poolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
-    };
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = 1000;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
-    poolInfo.pPoolSizes = poolSizes;
+// void VulkanContext::InitImGui(struct GLFWwindow* window) {
+//     // ImGUI 专属描述符池
+//     VkDescriptorPoolSize poolSizes[] = {
+//         { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+//         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+//         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+//         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+//         { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+//         { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+//         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+//         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+//         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+//         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+//         { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+//     };
+//     VkDescriptorPoolCreateInfo poolInfo{};
+//     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+//     poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+//     poolInfo.maxSets = 1000;
+//     poolInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
+//     poolInfo.pPoolSizes = poolSizes;
 
-    if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_ImGuiDescriptorPool) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to create ImGui descriptor pool!");
-        return;
-    }
+//     if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_ImGuiDescriptorPool) != VK_SUCCESS) {
+//         HR_LOG_ERROR("VulkanContext: Failed to create ImGui descriptor pool!");
+//         return;
+//     }
 
-    // 初始化 ImGui Vulkan 后端
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
-    // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;      // Enable Docking
-    ImGui::StyleColorsDark();
+//     // 初始化 ImGui Vulkan 后端
+//     IMGUI_CHECKVERSION();
+//     ImGui::CreateContext();
+//     ImGuiIO& io = ImGui::GetIO(); (void)io;
+//     // io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Enable Keyboard Controls
+//     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;      // Enable Docking
+//     ImGui::StyleColorsDark();
 
-    float xscale, yscale;
-    glfwGetWindowContentScale(window, &xscale, &yscale);
-    ImGui::GetIO().FontGlobalScale = xscale; // Adjust ImGui font scaling based on window content scale
-    ImGui::GetStyle().ScaleAllSizes(xscale);
-    // ImGui_ImplGlfw_InitForVulkan(window, true);
+//     float xscale, yscale;
+//     glfwGetWindowContentScale(window, &xscale, &yscale);
+//     ImGui::GetIO().FontGlobalScale = xscale; // Adjust ImGui font scaling based on window content scale
+//     ImGui::GetStyle().ScaleAllSizes(xscale);
+//     // ImGui_ImplGlfw_InitForVulkan(window, true);
 
-    // 配置 ImGui Vulkan 后端
-    ImGui_ImplGlfw_InitForVulkan(window, true);
-    ImGui_ImplVulkan_InitInfo init_info = {};
-    init_info.Instance = m_Instance;
-    init_info.PhysicalDevice = m_PhysicalDevice;
-    init_info.Device = m_Device;
-    init_info.QueueFamily = FindQueueFamilies(m_PhysicalDevice).graphicsFamily.value();
-    init_info.Queue = m_GraphicsQueue;
-    init_info.PipelineCache = VK_NULL_HANDLE;
-    init_info.DescriptorPool = m_ImGuiDescriptorPool;
-    init_info.PipelineInfoMain.Subpass = 0;
-    init_info.MinImageCount = 3;
-    init_info.ImageCount = 3;
-    init_info.PipelineInfoMain.MSAASamples = m_MsaaSamples;
-    init_info.PipelineInfoMain.RenderPass = m_RenderPass;
+//     // 配置 ImGui Vulkan 后端
+//     ImGui_ImplGlfw_InitForVulkan(window, true);
+//     ImGui_ImplVulkan_InitInfo init_info = {};
+//     init_info.Instance = m_Instance;
+//     init_info.PhysicalDevice = m_PhysicalDevice;
+//     init_info.Device = m_Device;
+//     init_info.QueueFamily = FindQueueFamilies(m_PhysicalDevice).graphicsFamily.value();
+//     init_info.Queue = m_GraphicsQueue;
+//     init_info.PipelineCache = VK_NULL_HANDLE;
+//     init_info.DescriptorPool = m_ImGuiDescriptorPool;
+//     init_info.PipelineInfoMain.Subpass = 0;
+//     init_info.MinImageCount = 3;
+//     init_info.ImageCount = 3;
+//     init_info.PipelineInfoMain.MSAASamples = m_MsaaSamples;
+//     init_info.PipelineInfoMain.RenderPass = m_RenderPass;
 
-    ImGui_ImplVulkan_Init(&init_info);
+//     ImGui_ImplVulkan_Init(&init_info);
 
-}
+// }
 
 void VulkanContext::CreateOffscreenResources() {
     // Position G-Buffer
@@ -1678,7 +1678,7 @@ void VulkanContext::CreatePostProcessPipeline() {
     HR_LOG_INFO("VulkanContext: Post-Process Pipeline created.");
 }
 
-void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float ambientStrength, float specularStrength, float exposure, float vignette) {
+void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float ambientStrength, float specularStrength, float exposure, float vignette, std::function<void(VkCommandBuffer)> uiRenderCallback) {
     // Wait for the previous frame to finish GPU execution.
     // 等待上一帧的 GPU 渲染执行完毕。
     vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
@@ -1752,7 +1752,9 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     vkCmdDraw(m_CommandBuffer, 3, 1, 0, 0);
 
     // Pass 3: 叠加 ImGui UI
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_CommandBuffer);
+    if (uiRenderCallback) {
+        uiRenderCallback(m_CommandBuffer);
+    }
 
     vkCmdEndRenderPass(m_CommandBuffer);
     if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
@@ -1817,12 +1819,12 @@ void VulkanContext::Cleanup() {
         vkFreeMemory(m_Device, m_GBufferAlbedoImageMemory, nullptr);
     }
 
-    // ImGui Cleanup
-    ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    vkDestroyDescriptorPool(m_Device, m_ImGuiDescriptorPool, nullptr);
-    HR_LOG_INFO("VulkanContext: ImGui resources destroyed.");
+    // // ImGui Cleanup
+    // ImGui_ImplVulkan_Shutdown();
+    // ImGui_ImplGlfw_Shutdown();
+    // ImGui::DestroyContext();
+    // vkDestroyDescriptorPool(m_Device, m_ImGuiDescriptorPool, nullptr);
+    // HR_LOG_INFO("VulkanContext: ImGui resources destroyed.");
 
     if (m_TextureSampler != VK_NULL_HANDLE) vkDestroySampler(m_Device, m_TextureSampler, nullptr);
     if (m_TextureImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_TextureImageView, nullptr);

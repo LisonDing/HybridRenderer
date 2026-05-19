@@ -7,9 +7,7 @@
 #include "Core/Camera.h"
 #include "Renderer/VulkanContext.h"
 
-#include <imgui.h>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_vulkan.h>
+#include "Editor/ImGuiLayer.h"
 
 // Constants and Global Camera State
 // 常量与全局摄像机状态 (由于 GLFW C-API 回调的限制，需要使用全局或静态变量)
@@ -35,7 +33,7 @@ float lastFrame = 0.0f;
 // Mouse movement callback.
 // 鼠标位移回调函数。
 void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
-    if (ImGui::GetIO().WantCaptureMouse) return; // 如果 ImGui 正在捕获鼠标输入，则不处理摄像机控制，避免冲突。
+    if (UI::ImGuiLayer::WantCaptureMouse()) return; // 如果 ImGui 正在捕获鼠标输入，则不处理摄像机控制，避免冲突。
 
     float xpos = static_cast<float>(xposIn);
     float ypos = static_cast<float>(yposIn);
@@ -93,7 +91,7 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
-    if (ImGui::GetIO().WantCaptureMouse) return; 
+    if (UI::ImGuiLayer::WantCaptureMouse()) return; 
 
     // 【Blender 逻辑】滚轮 = 以焦点为基准拉近/推远 (Zoom)
     // 稍微调高一点灵敏度，让滚轮缩放更爽快
@@ -101,7 +99,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 }
 
 void processInput(GLFWwindow *window) {
-    if (ImGui::GetIO().WantCaptureKeyboard) return; 
+    if (UI::ImGuiLayer::WantCaptureKeyboard()) return; 
 
     // ESC 退出
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
@@ -204,7 +202,9 @@ int main() {
     vkContext.CreateDescriptorPool(); // 创建描述符池，管理描述符集的分配
     vkContext.CreateDescriptorSets(); // 创建描述符集，绑定纹理与 uniform 数据，必须在纹理资源创建完成后进行绑定
 
-    vkContext.InitImGui(window); // 初始化 ImGui，创建专用描述符池并绑定 Vulkan 与 GLFW
+    UI::ImGuiLayer uiLayer;
+    uiLayer.Init(window, vkContext.GetInstance(), vkContext.GetPhysicalDevice(), vkContext.GetDevice(), 
+                 vkContext.GetGraphicsQueueFamily(), vkContext.GetGraphicsQueue(), vkContext.GetPostProcessRenderPass());
     glm::vec3 lightDir = glm::vec3(5.0f, 10.0f, 3.0f); // 定义一个固定的光照方向
     float ambientStrength = 0.5f; // 环境光强度
     float specularStrength = 0.5f; // 镜面反射强
@@ -227,34 +227,10 @@ int main() {
         processInput(window);
         glfwPollEvents();
 
-        // UI Rendering with ImGui
-        // 使用 ImGui 构建 UI 界面
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        // 设置窗口大小与位置
-        ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Once);
-        ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_Once);
-
-        ImGui::Begin("Control Panel");
-        // ImGui::Text("Hybrid Renderer Engine");
-        // ImGui::Separator();
-        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-        ImGui::Separator();
-        // 实时渲染参数滑块
-        ImGui::Text("Lighting Settings");
-        ImGui::SliderFloat("Light Dir", &lightDir.x, -10.0f, 10.0f);
-        ImGui::SliderFloat("Ambient Strength", &ambientStrength, 0.0f, 1.0f);
-        ImGui::SliderFloat("Specular Strength", &specularStrength, 0.0f, 2.0f);
-        ImGui::Separator();
-        //
-        ImGui::Text("Post-Processing");
-        ImGui::SliderFloat("Exposure", &exposure, 0.1f, 5.0f);
-        ImGui::SliderFloat("Vignette", &vignetteStrength, 0.0f, 1.0f);
-
-        ImGui::End();
-        // 发送UI数据到GPU并渲染
-        ImGui::Render();
+        // Start a new ImGui frame and render the control panel.
+        // 启动新的 ImGui 帧，并渲染控制面板。
+        uiLayer.NewFrame();
+        uiLayer.RenderControlPanel(lightDir, ambientStrength, specularStrength, exposure, vignetteStrength);
 
         // Compute current View and Projection matrices.
         // 计算当前帧的观察与投影矩阵。
@@ -264,12 +240,15 @@ int main() {
 
         // Inject matrices into the rendering pipeline.
         // 将矩阵注入渲染管线。
-        vkContext.DrawFrame(view, proj,camera.Position,lightDir, ambientStrength, specularStrength,exposure, vignetteStrength); 
+        vkContext.DrawFrame(view, proj,camera.Position,lightDir, ambientStrength, specularStrength,exposure, vignetteStrength, [&](VkCommandBuffer cmd) {
+            uiLayer.RenderDrawData(cmd); // 在渲染过程中调用 ImGui 的绘制数据函数，将 UI 绘制命令注入到当前的命令缓冲中
+        });
     }
     
     vkDeviceWaitIdle(vkContext.GetDevice()); 
 
     HR_LOG_INFO("--- System Shutdown ---");
+    uiLayer.Cleanup();
     vkContext.Cleanup();
     glfwDestroyWindow(window);
     glfwTerminate();

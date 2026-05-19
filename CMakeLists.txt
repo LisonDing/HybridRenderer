@@ -88,8 +88,31 @@ file(GLOB IMGUI_SOURCES
 # ==========================================
 # 核心引擎构建 (Target Creation) - 移到前面！
 # ==========================================
-file(GLOB_RECURSE SRC_FILES "src/*.cpp" "src/*.h")
-add_executable(HybridRenderer ${SRC_FILES})
+# 1. Core (核心层：入口、生命周期)
+set(CORE_SOURCES
+    "src/main.cpp"
+)
+
+# 2. RHI (渲染硬件接口层：Vulkan 封装)
+set(RHI_SOURCES
+    "src/Renderer/VulkanContext.cpp"
+    "src/Renderer/VulkanContext.h"
+)
+
+# 3. Editor (编辑器界面层：UI 与交互)
+set(EDITOR_SOURCES
+    "src/Editor/ImGuiLayer.cpp"
+    "src/Editor/ImGuiLayer.h"
+)
+
+# 整合所有模块的源码
+set(ALL_SOURCES 
+    ${CORE_SOURCES} 
+    ${RHI_SOURCES} 
+    ${EDITOR_SOURCES}
+)
+
+add_executable(HybridRenderer ${ALL_SOURCES})
 
 target_include_directories(HybridRenderer PRIVATE src ${STB_IMAGE_DIR} ${CMAKE_SOURCE_DIR}/external/tinyobjloader ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(HybridRenderer PRIVATE Vulkan::Vulkan glfw glm::glm)
