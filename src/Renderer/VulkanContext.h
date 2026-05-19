@@ -1,6 +1,8 @@
 #pragma once
 
 #include "glm/fwd.hpp"
+#include "../Resource/Texture.h"
+#include "../Resource/Model.h"
 // #include "imgui_impl_glfw.h"
 #include <functional>
 #include <sys/types.h>
@@ -21,55 +23,55 @@
 
 namespace Renderer {
 
-// Standard vertex structure aligning with shader inputs.
-// 标准顶点结构体，需与着色器输入布局严格对齐。
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord; 
-    glm::vec3 normal; // 【新增】顶点法线向量，用于光照计算
+// // Standard vertex structure aligning with shader inputs.
+// // 标准顶点结构体，需与着色器输入布局严格对齐。
+// struct Vertex {
+//     glm::vec3 pos;
+//     glm::vec3 color;
+//     glm::vec2 texCoord; 
+//     glm::vec3 normal; // 【新增】顶点法线向量，用于光照计算
 
-    // 更新相等运算符
-    bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal;
-    }
+//     // 更新相等运算符
+//     bool operator==(const Vertex& other) const {
+//         return pos == other.pos && color == other.color && texCoord == other.texCoord && normal == other.normal;
+//     }
 
-    static VkVertexInputBindingDescription GetBindingDescription() {
-        VkVertexInputBindingDescription bindingDescription{};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        return bindingDescription;
-    }
+//     static VkVertexInputBindingDescription GetBindingDescription() {
+//         VkVertexInputBindingDescription bindingDescription{};
+//         bindingDescription.binding = 0;
+//         bindingDescription.stride = sizeof(Vertex);
+//         bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+//         return bindingDescription;
+//     }
 
-    // 将属性数量从 3 提升到 4
-    static std::array<VkVertexInputAttributeDescription, 4> GetAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions{};
+//     // 将属性数量从 3 提升到 4
+//     static std::array<VkVertexInputAttributeDescription, 4> GetAttributeDescriptions() {
+//         std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions{};
 
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+//         attributeDescriptions[0].binding = 0;
+//         attributeDescriptions[0].location = 0;
+//         attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+//         attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, color);
+//         attributeDescriptions[1].binding = 0;
+//         attributeDescriptions[1].location = 1;
+//         attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+//         attributeDescriptions[1].offset = offsetof(Vertex, color);
 
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+//         attributeDescriptions[2].binding = 0;
+//         attributeDescriptions[2].location = 2;
+//         attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+//         attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
 
-        // 【新增】法线属性映射
-        attributeDescriptions[3].binding = 0;
-        attributeDescriptions[3].location = 3;
-        attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[3].offset = offsetof(Vertex, normal);
+//         // 【新增】法线属性映射
+//         attributeDescriptions[3].binding = 0;
+//         attributeDescriptions[3].location = 3;
+//         attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+//         attributeDescriptions[3].offset = offsetof(Vertex, normal);
 
-        return attributeDescriptions;
-    }
-};
+//         return attributeDescriptions;
+//     }
+// };
 
 // 推送常量结构体
 struct PostProcessParams {
@@ -79,18 +81,18 @@ struct PostProcessParams {
 
 } // namespace Renderer （临时闭合，注入std）
 
-namespace std {
-    // Inject custom hash function for the Vertex struct into the std namespace.
-    // 将 Vertex 结构体的自定义哈希函数注入 std 命名空间。
-    template<> struct hash<Renderer::Vertex> {
-        size_t operator()(Renderer::Vertex const& vertex) const {
-            return ((hash<glm::vec3>()(vertex.pos) ^
-                   (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
-                   (hash<glm::vec2>()(vertex.texCoord) << 1) ^
-                   (hash<glm::vec3>()(vertex.normal) << 1); // 【新增】将法线纳入哈希计算
-        }
-    };
-} // namespace std
+// namespace std {
+//     // Inject custom hash function for the Vertex struct into the std namespace.
+//     // 将 Vertex 结构体的自定义哈希函数注入 std 命名空间。
+//     template<> struct hash<Renderer::Vertex> {
+//         size_t operator()(Renderer::Vertex const& vertex) const {
+//             return ((hash<glm::vec3>()(vertex.pos) ^
+//                    (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+//                    (hash<glm::vec2>()(vertex.texCoord) << 1) ^
+//                    (hash<glm::vec3>()(vertex.normal) << 1); // 【新增】将法线纳入哈希计算
+//         }
+//     };
+// } // namespace std
 
 namespace Renderer {
 // Uniform Buffer Object structure. Memory alignment is strictly enforced (16 bytes).
@@ -153,8 +155,8 @@ public:
     void CreateSyncObjects();
 
     // --- Memory & Buffers ---
-    void CreateVertexBuffer();
-    void CreateIndexBuffer();
+    // void CreateVertexBuffer();
+    // void CreateIndexBuffer();
     void CreateDescriptorSetLayout();
     void CreateUniformBuffers();
     void CreateDescriptorPool();
@@ -169,18 +171,22 @@ public:
     void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
     void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
     VkImageView CreateImageView(VkImage image, VkFormat format, uint32_t mipLevels); // Refactored for reuse / 提取出来以便复用
+    void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+    void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
 
     // --- Texture Resources ---
-    void CreateTextureImage();
-    void CreateTextureImageView();
-    void CreateTextureSampler();
+    // void CreateTextureImage();
+    // void CreateTextureImageView();
+    // void CreateTextureSampler();
+    void LoadTexture(const std::string& path);
 
     // --- Depth Testing & Blending ---
     void CreateDepthResources();
     // void CreateColorResources(); // Helper to create the color image used for MSAA rendering.
 
     // --- Model Loading & Asset Management ---
-    void LoadModel();
+    // void LoadModel();
+    void LoadModel(const std::string& path);
 
     // --- ImGui Integration ---
     // void InitImGui (struct GLFWwindow* window);
@@ -198,11 +204,11 @@ public:
 private:
     QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
-    void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+    // void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
     void UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos, const glm::vec3& lightDir, float ambientStrength, float specularStrength);
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
-    void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
+    // void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
     VkSampleCountFlagBits GetMaxUsableSampleCount(); // Helper to query the maximum supported MSAA sample count for the device.
 
     // Core Vulkan Handles
@@ -236,18 +242,20 @@ private:
     VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
     VkPipeline       m_GraphicsPipeline = VK_NULL_HANDLE;
 
-    // Texture Resources
-    // 纹理贴图
-    uint32_t       m_MipLevels = 1; // 纹理 mipmap 层级数量
-    VkImage        m_TextureImage = VK_NULL_HANDLE;
-    VkDeviceMemory m_TextureImageMemory = VK_NULL_HANDLE;
-    VkImageView    m_TextureImageView = VK_NULL_HANDLE;
-    VkSampler      m_TextureSampler = VK_NULL_HANDLE;
+    // // Texture Resources
+    // // 纹理贴图
+    // uint32_t       m_MipLevels = 1; // 纹理 mipmap 层级数量
+    // VkImage        m_TextureImage = VK_NULL_HANDLE;
+    // VkDeviceMemory m_TextureImageMemory = VK_NULL_HANDLE;
+    // VkImageView    m_TextureImageView = VK_NULL_HANDLE;
+    // VkSampler      m_TextureSampler = VK_NULL_HANDLE;
+    Resource::Texture2D m_AlbedoMap;
 
-    // Model Data
-    // 模型数据
-    std::vector<Vertex> m_Vertices;
-    std::vector<uint32_t> m_Indices;
+    // // Model Data
+    // // 模型数据
+    // std::vector<Vertex> m_Vertices;
+    // std::vector<uint32_t> m_Indices;
+    Resource::Model m_MainModel;
 
 
     // Command & Synchronization
@@ -258,12 +266,12 @@ private:
     VkSemaphore     m_RenderFinishedSemaphore = VK_NULL_HANDLE;
     VkFence         m_InFlightFence = VK_NULL_HANDLE;
 
-    // Buffers & Memory
-    // 缓冲与物理显存
-    VkBuffer       m_VertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory m_VertexBufferMemory = VK_NULL_HANDLE;
-    VkBuffer       m_IndexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory m_IndexBufferMemory = VK_NULL_HANDLE;
+    // // Buffers & Memory
+    // // 缓冲与物理显存
+    // VkBuffer       m_VertexBuffer = VK_NULL_HANDLE;
+    // VkDeviceMemory m_VertexBufferMemory = VK_NULL_HANDLE;
+    // VkBuffer       m_IndexBuffer = VK_NULL_HANDLE;
+    // VkDeviceMemory m_IndexBufferMemory = VK_NULL_HANDLE;
 
     // Depth Resources
     // 深度测试资源

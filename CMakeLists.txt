@@ -91,6 +91,10 @@ file(GLOB IMGUI_SOURCES
 # 1. Core (核心层：入口、生命周期)
 set(CORE_SOURCES
     "src/main.cpp"
+    "src/Core/Logger.h"
+    "src/Core/Camera.h"
+    "src/Core/Application.cpp"
+    "src/Core/Application.h"
 )
 
 # 2. RHI (渲染硬件接口层：Vulkan 封装)
@@ -105,11 +109,20 @@ set(EDITOR_SOURCES
     "src/Editor/ImGuiLayer.h"
 )
 
+# 4. Resource (资产与数据驱动层)
+set(RESOURCE_SOURCES
+    "src/Resource/Texture.cpp"
+    "src/Resource/Texture.h"
+    "src/Resource/Model.cpp"
+    "src/Resource/Model.h"
+)
+
 # 整合所有模块的源码
 set(ALL_SOURCES 
     ${CORE_SOURCES} 
     ${RHI_SOURCES} 
     ${EDITOR_SOURCES}
+    ${RESOURCE_SOURCES}
 )
 
 add_executable(HybridRenderer ${ALL_SOURCES})

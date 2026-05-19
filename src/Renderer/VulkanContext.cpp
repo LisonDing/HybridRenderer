@@ -3,10 +3,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <tiny_obj_loader.h>
+// #define STB_IMAGE_IMPLEMENTATION
+// #include <stb_image.h>
+// #define TINYOBJLOADER_IMPLEMENTATION
+// #include <tiny_obj_loader.h>
 
 #include "VulkanContext.h"
 #include "../Core/Logger.h"
@@ -803,210 +803,216 @@ void VulkanContext::GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t
     HR_LOG_INFO("VulkanContext: Mipmaps generated for texture image.");
 }
 
+void VulkanContext::LoadTexture(const std::string& path) {
+    m_AlbedoMap.LoadFromFile(path, *this);
+}
 
-void VulkanContext::CreateTextureImage() {
-    int texWidth, texHeight, texChannels;
+// void VulkanContext::CreateTextureImage() {
+//     int texWidth, texHeight, texChannels;
 
-    // Tell stb_image to flip the Y-axis during load to match Vulkan/GLM coordinates.
-    // 指示 stb_image 在加载时翻转 Y 轴，以匹配我们的 Vulkan/GLM 坐标系修正。
-    // stbi_set_flip_vertically_on_load(true);
+//     // Tell stb_image to flip the Y-axis during load to match Vulkan/GLM coordinates.
+//     // 指示 stb_image 在加载时翻转 Y 轴，以匹配我们的 Vulkan/GLM 坐标系修正。
+//     // stbi_set_flip_vertically_on_load(true);
 
-    // Load image from disk. Force 4 channels (RGBA).
-    // 从硬盘读取图片，强制转换为 4 通道 (RGBA)。
-    stbi_uc* pixels = stbi_load("../assets/textures/viking_room.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    VkDeviceSize imageSize = texWidth * texHeight * 4;
+//     // Load image from disk. Force 4 channels (RGBA).
+//     // 从硬盘读取图片，强制转换为 4 通道 (RGBA)。
+//     stbi_uc* pixels = stbi_load("../assets/textures/viking_room.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+//     VkDeviceSize imageSize = texWidth * texHeight * 4;
 
-    if (!pixels) {
-        HR_LOG_ERROR("VulkanContext: Failed to load texture image!");
-        return;
-    }
+//     if (!pixels) {
+//         HR_LOG_ERROR("VulkanContext: Failed to load texture image!");
+//         return;
+//     }
 
-    // Caculate maximum mip levels based on image dimensions
-    // 根据图片尺寸计算最大 mip 级别数量
-    m_MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+//     // Caculate maximum mip levels based on image dimensions
+//     // 根据图片尺寸计算最大 mip 级别数量
+//     m_MipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    CreateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+//     VkBuffer stagingBuffer;
+//     VkDeviceMemory stagingBufferMemory;
+//     CreateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-    void* data;
-    vkMapMemory(m_Device, stagingBufferMemory, 0, imageSize, 0, &data);
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
-    vkUnmapMemory(m_Device, stagingBufferMemory);
+//     void* data;
+//     vkMapMemory(m_Device, stagingBufferMemory, 0, imageSize, 0, &data);
+//     memcpy(data, pixels, static_cast<size_t>(imageSize));
+//     vkUnmapMemory(m_Device, stagingBufferMemory);
 
-    // Free RAM after copying to staging buffer.
-    // 将像素复制到暂存缓冲后，释放系统 RAM 中的图片数据。
-    stbi_image_free(pixels);
+//     // Free RAM after copying to staging buffer.
+//     // 将像素复制到暂存缓冲后，释放系统 RAM 中的图片数据。
+//     stbi_image_free(pixels);
 
-    // 避开 MAC 设备上对 VK_FORMAT_R8G8B8A8_SRGB 的线性过滤限制，直接使用 optimalTiling 来创建图像。
-    VkFormat safeFormat = VK_FORMAT_R8G8B8A8_SRGB;
+//     // 避开 MAC 设备上对 VK_FORMAT_R8G8B8A8_SRGB 的线性过滤限制，直接使用 optimalTiling 来创建图像。
+//     VkFormat safeFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
-    CreateImage(texWidth, texHeight, m_MipLevels, VK_SAMPLE_COUNT_1_BIT, safeFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
+//     CreateImage(texWidth, texHeight, m_MipLevels, VK_SAMPLE_COUNT_1_BIT, safeFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_TextureImage, m_TextureImageMemory);
 
-    // Transition -> Copy -> Transition to Shader Read Optimization
-    // 转换布局 -> 复制数据 -> 转换至着色器读取最优化布局
-    TransitionImageLayout(m_TextureImage, safeFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_MipLevels);
-    CopyBufferToImage(stagingBuffer, m_TextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-    // TransitionImageLayout(m_TextureImage, safeFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_MipLevels);
+//     // Transition -> Copy -> Transition to Shader Read Optimization
+//     // 转换布局 -> 复制数据 -> 转换至着色器读取最优化布局
+//     TransitionImageLayout(m_TextureImage, safeFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, m_MipLevels);
+//     CopyBufferToImage(stagingBuffer, m_TextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+//     // TransitionImageLayout(m_TextureImage, safeFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_MipLevels);
 
-    // Auto-generate mipmaps on the GPU and transition layouts
-    // 在 GPU 上自动生成 mipmaps 并转换布局
-    GenerateMipmaps(m_TextureImage, safeFormat, texWidth, texHeight, m_MipLevels);
+//     // Auto-generate mipmaps on the GPU and transition layouts
+//     // 在 GPU 上自动生成 mipmaps 并转换布局
+//     GenerateMipmaps(m_TextureImage, safeFormat, texWidth, texHeight, m_MipLevels);
 
-    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+//     vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+//     vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
     
-    HR_LOG_INFO("VulkanContext: Texture Image loaded into VRAM." + std::to_string(m_MipLevels) + " mip levels generated.");
-}
+//     HR_LOG_INFO("VulkanContext: Texture Image loaded into VRAM." + std::to_string(m_MipLevels) + " mip levels generated.");
+// }
 
-void VulkanContext::CreateTextureImageView() {
-    m_TextureImageView = CreateImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, m_MipLevels);
-     HR_LOG_INFO("VulkanContext: Texture Image View created.");
-}
+// void VulkanContext::CreateTextureImageView() {
+//     m_TextureImageView = CreateImageView(m_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, m_MipLevels);
+//      HR_LOG_INFO("VulkanContext: Texture Image View created.");
+// }
 
-void VulkanContext::CreateTextureSampler() {
-    // Configures how the shader reads pixels (filtering, wrap mode).
-    // 配置着色器读取像素时的插值过滤和边缘环绕模式。
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = static_cast<float>(m_MipLevels);
-    samplerInfo.mipLodBias = 0.0f;
+// void VulkanContext::CreateTextureSampler() {
+//     // Configures how the shader reads pixels (filtering, wrap mode).
+//     // 配置着色器读取像素时的插值过滤和边缘环绕模式。
+//     VkSamplerCreateInfo samplerInfo{};
+//     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+//     samplerInfo.magFilter = VK_FILTER_LINEAR;
+//     samplerInfo.minFilter = VK_FILTER_LINEAR;
+//     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+//     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+//     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+//     samplerInfo.anisotropyEnable = VK_FALSE;
+//     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+//     samplerInfo.unnormalizedCoordinates = VK_FALSE;
+//     samplerInfo.compareEnable = VK_FALSE;
+//     samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+//     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+//     samplerInfo.minLod = 0.0f;
+//     samplerInfo.maxLod = static_cast<float>(m_MipLevels);
+//     samplerInfo.mipLodBias = 0.0f;
 
-    if (vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_TextureSampler) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to create texture sampler!");
-    }
-}
+//     if (vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_TextureSampler) != VK_SUCCESS) {
+//         HR_LOG_ERROR("VulkanContext: Failed to create texture sampler!");
+//     }
+// }
 
 // 模型资产
 
-void VulkanContext::LoadModel() {
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn, err;
+// void VulkanContext::LoadModel() {
+//     tinyobj::attrib_t attrib;
+//     std::vector<tinyobj::shape_t> shapes;
+//     std::vector<tinyobj::material_t> materials;
+//     std::string warn, err;
 
-    // Load standard OBJ file from assets directory.
-    // 从资产目录加载标准的 OBJ 格式 3D 模型文件。
-    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "../assets/models/viking_room.obj")) {
-        HR_LOG_ERROR("VulkanContext: Failed to load model! " + warn + err);
-        return;
-    }
+//     // Load standard OBJ file from assets directory.
+//     // 从资产目录加载标准的 OBJ 格式 3D 模型文件。
+//     if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "../assets/models/viking_room.obj")) {
+//         HR_LOG_ERROR("VulkanContext: Failed to load model! " + warn + err);
+//         return;
+//     }
 
-    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+//     std::unordered_map<Vertex, uint32_t> uniqueVertices{};
 
-    // 新增：用于记录模型的物理边界
-    glm::vec3 minBounds(FLT_MAX);
-    glm::vec3 maxBounds(-FLT_MAX);
+//     // 新增：用于记录模型的物理边界
+//     glm::vec3 minBounds(FLT_MAX);
+//     glm::vec3 maxBounds(-FLT_MAX);
 
-    for (const auto& shape : shapes) {
-        // Change loop to process 3 indices at a time (one triangle per iteration).
-        // 修改循环以每次处理 3 个索引（每次迭代一个三角形）。
-        for (size_t i = 0; i < shape.mesh.indices.size(); i += 3) {
-            auto idx0 = shape.mesh.indices[i + 0];
-            auto idx1 = shape.mesh.indices[i + 1];
-            auto idx2 = shape.mesh.indices[i + 2];
+//     for (const auto& shape : shapes) {
+//         // Change loop to process 3 indices at a time (one triangle per iteration).
+//         // 修改循环以每次处理 3 个索引（每次迭代一个三角形）。
+//         for (size_t i = 0; i < shape.mesh.indices.size(); i += 3) {
+//             auto idx0 = shape.mesh.indices[i + 0];
+//             auto idx1 = shape.mesh.indices[i + 1];
+//             auto idx2 = shape.mesh.indices[i + 2];
 
-            // Extract coordinates for the 3 verices of the triangle.
-            // 提取三角形的 3 个顶点的坐标。
+//             // Extract coordinates for the 3 verices of the triangle.
+//             // 提取三角形的 3 个顶点的坐标。
 
-            glm::vec3 pos0 = {
-                attrib.vertices[3 * idx0.vertex_index + 0],
-                attrib.vertices[3 * idx0.vertex_index + 1],
-                attrib.vertices[3 * idx0.vertex_index + 2]
-            };
-            glm::vec3 pos1 = {
-                attrib.vertices[3 * idx1.vertex_index + 0],
-                attrib.vertices[3 * idx1.vertex_index + 1],
-                attrib.vertices[3 * idx1.vertex_index + 2]
-            };
-            glm::vec3 pos2 = {
-                attrib.vertices[3 * idx2.vertex_index + 0],  
-                attrib.vertices[3 * idx2.vertex_index + 1],
-                attrib.vertices[3 * idx2.vertex_index + 2]
-            };
+//             glm::vec3 pos0 = {
+//                 attrib.vertices[3 * idx0.vertex_index + 0],
+//                 attrib.vertices[3 * idx0.vertex_index + 1],
+//                 attrib.vertices[3 * idx0.vertex_index + 2]
+//             };
+//             glm::vec3 pos1 = {
+//                 attrib.vertices[3 * idx1.vertex_index + 0],
+//                 attrib.vertices[3 * idx1.vertex_index + 1],
+//                 attrib.vertices[3 * idx1.vertex_index + 2]
+//             };
+//             glm::vec3 pos2 = {
+//                 attrib.vertices[3 * idx2.vertex_index + 0],  
+//                 attrib.vertices[3 * idx2.vertex_index + 1],
+//                 attrib.vertices[3 * idx2.vertex_index + 2]
+//             };
             
-            // Calculate face normal using the cross product of two edges of the triangle.
-            // 使用三角形的两条边的叉积计算面法线。
-            glm::vec3 edge1 = pos1 - pos0;
-            glm::vec3 edge2 = pos2 - pos0;
-            glm::vec3 faceNormal = glm::normalize(glm::cross(edge1, edge2));
+//             // Calculate face normal using the cross product of two edges of the triangle.
+//             // 使用三角形的两条边的叉积计算面法线。
+//             glm::vec3 edge1 = pos1 - pos0;
+//             glm::vec3 edge2 = pos2 - pos0;
+//             glm::vec3 faceNormal = glm::normalize(glm::cross(edge1, edge2));
 
-            // Array of indices to process each vertex identically.
-            // 索引数组，用于统一处理每个顶点。
-            tinyobj::index_t indices_array[3] = {idx0, idx1, idx2};
+//             // Array of indices to process each vertex identically.
+//             // 索引数组，用于统一处理每个顶点。
+//             tinyobj::index_t indices_array[3] = {idx0, idx1, idx2};
 
-            for (int j = 0; j < 3; ++j) {
-                // Process each vertex of the triangle.
-                // 处理三角形的每个顶点。
-                auto index = indices_array[j];
-                Vertex vertex{};
-                vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
+//             for (int j = 0; j < 3; ++j) {
+//                 // Process each vertex of the triangle.
+//                 // 处理三角形的每个顶点。
+//                 auto index = indices_array[j];
+//                 Vertex vertex{};
+//                 vertex.pos = {
+//                     attrib.vertices[3 * index.vertex_index + 0],
+//                     attrib.vertices[3 * index.vertex_index + 1],
+//                     attrib.vertices[3 * index.vertex_index + 2]
+//                 };
 
-                minBounds = glm::min(minBounds, vertex.pos);
-                maxBounds = glm::max(maxBounds, vertex.pos);
+//                 minBounds = glm::min(minBounds, vertex.pos);
+//                 maxBounds = glm::max(maxBounds, vertex.pos);
 
-                if (index.texcoord_index >= 0) {
-                    vertex.texCoord = {
-                        attrib.texcoords[2 * index.texcoord_index + 0],
-                        1.0f - attrib.texcoords[2 * index.texcoord_index + 1] 
-                    };
-                } 
+//                 if (index.texcoord_index >= 0) {
+//                     vertex.texCoord = {
+//                         attrib.texcoords[2 * index.texcoord_index + 0],
+//                         1.0f - attrib.texcoords[2 * index.texcoord_index + 1] 
+//                     };
+//                 } 
 
-                // Use provided normal if it exists; otherwise fallback to computed face normal.
-                // 如果存在法线则使用提供的法线，否则使用计算得到的面法
-                if (attrib.normals.size() > 0 && index.normal_index >= 0) {
-                    vertex.normal = {
-                        attrib.normals[3 * index.normal_index + 0],
-                        attrib.normals[3 * index.normal_index + 1],
-                        attrib.normals[3 * index.normal_index + 2]
-                    };
-                } else {
-                    vertex.normal = faceNormal;
-                }
+//                 // Use provided normal if it exists; otherwise fallback to computed face normal.
+//                 // 如果存在法线则使用提供的法线，否则使用计算得到的面法
+//                 if (attrib.normals.size() > 0 && index.normal_index >= 0) {
+//                     vertex.normal = {
+//                         attrib.normals[3 * index.normal_index + 0],
+//                         attrib.normals[3 * index.normal_index + 1],
+//                         attrib.normals[3 * index.normal_index + 2]
+//                     };
+//                 } else {
+//                     vertex.normal = faceNormal;
+//                 }
 
-                vertex.color = {1.0f, 1.0f, 1.0f};
+//                 vertex.color = {1.0f, 1.0f, 1.0f};
 
-                if (uniqueVertices.count(vertex) == 0) {
-                    uniqueVertices[vertex] = static_cast<uint32_t>(m_Vertices.size());
-                    m_Vertices.push_back(vertex);
-                }
+//                 if (uniqueVertices.count(vertex) == 0) {
+//                     uniqueVertices[vertex] = static_cast<uint32_t>(m_Vertices.size());
+//                     m_Vertices.push_back(vertex);
+//                 }
 
-                m_Indices.push_back(uniqueVertices[vertex]);
-            }
-        }
-    }
-    // =======================================================
-    // 核心修复：归一化模型空间 (Model Space Normalization)
-    // 强行把模型的几何中心对齐到世界原点 (0,0,0)，并缩放到统一大小
-    // =======================================================
-    glm::vec3 center = (minBounds + maxBounds) / 2.0f;
-    glm::vec3 extents = maxBounds - minBounds;
-    // 取最长的一边作为缩放基准，确保模型不会过大撑爆屏幕
-    float maxDim = std::max(extents.x, std::max(extents.y, extents.z));
+//                 m_Indices.push_back(uniqueVertices[vertex]);
+//             }
+//         }
+//     }
+//     // =======================================================
+//     // 核心修复：归一化模型空间 (Model Space Normalization)
+//     // 强行把模型的几何中心对齐到世界原点 (0,0,0)，并缩放到统一大小
+//     // =======================================================
+//     glm::vec3 center = (minBounds + maxBounds) / 2.0f;
+//     glm::vec3 extents = maxBounds - minBounds;
+//     // 取最长的一边作为缩放基准，确保模型不会过大撑爆屏幕
+//     float maxDim = std::max(extents.x, std::max(extents.y, extents.z));
 
-    for (auto& v : m_Vertices) {
-        // 先居中，再缩放 (缩放比例你可以根据需要微调，这里缩放到直径为 2.0 的空间)
-        v.pos = (v.pos - center) / maxDim * 2.0f;
-    }
-    HR_LOG_INFO("VulkanContext: Model loaded. Vertices: " + std::to_string(m_Vertices.size()) + " Indices: " + std::to_string(m_Indices.size()));
+//     for (auto& v : m_Vertices) {
+//         // 先居中，再缩放 (缩放比例你可以根据需要微调，这里缩放到直径为 2.0 的空间)
+//         v.pos = (v.pos - center) / maxDim * 2.0f;
+//     }
+//     HR_LOG_INFO("VulkanContext: Model loaded. Vertices: " + std::to_string(m_Vertices.size()) + " Indices: " + std::to_string(m_Indices.size()));
+// }
+
+void VulkanContext::LoadModel(const std::string& path) {
+    m_MainModel.LoadFromFile(path, *this);
 }
-
 
 // 深度控制
 VkFormat VulkanContext::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
@@ -1135,63 +1141,63 @@ void VulkanContext::CreateFramebuffers() {
     HR_LOG_INFO("VulkanContext: G-Buffer & Swapchain Framebuffers created.");
 }
 
-void VulkanContext::CreateVertexBuffer() {
-    VkDeviceSize bufferSize = sizeof(m_Vertices[0]) * m_Vertices.size();
+// void VulkanContext::CreateVertexBuffer() {
+//     VkDeviceSize bufferSize = sizeof(m_Vertices[0]) * m_Vertices.size();
 
-    // Create a host-visible staging buffer.
-    // 创建主机可见的暂存缓冲。
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
-                 stagingBuffer, stagingBufferMemory);
+//     // Create a host-visible staging buffer.
+//     // 创建主机可见的暂存缓冲。
+//     VkBuffer stagingBuffer;
+//     VkDeviceMemory stagingBufferMemory;
+//     CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+//                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+//                  stagingBuffer, stagingBufferMemory);
 
-    void* data;
-    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); 
-    memcpy(data, m_Vertices.data(), (size_t)bufferSize);                  
-    vkUnmapMemory(m_Device, stagingBufferMemory);                        
+//     void* data;
+//     vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data); 
+//     memcpy(data, m_Vertices.data(), (size_t)bufferSize);                  
+//     vkUnmapMemory(m_Device, stagingBufferMemory);                        
 
-    // Create a device-local vertex buffer.
-    // 创建设备本地的高速顶点缓冲。
-    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
-                 m_VertexBuffer, m_VertexBufferMemory);
+//     // Create a device-local vertex buffer.
+//     // 创建设备本地的高速顶点缓冲。
+//     CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+//                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+//                  m_VertexBuffer, m_VertexBufferMemory);
 
-    // Transfer data from staging to VRAM.
-    // 通过直接内存访问 (DMA) 将数据移入显存。
-    CopyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
+//     // Transfer data from staging to VRAM.
+//     // 通过直接内存访问 (DMA) 将数据移入显存。
+//     CopyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
 
-    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+//     vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+//     vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
 
-    HR_LOG_INFO("VulkanContext: Vertex Buffer created and loaded into VRAM.");
-}
+//     HR_LOG_INFO("VulkanContext: Vertex Buffer created and loaded into VRAM.");
+// }
 
-void VulkanContext::CreateIndexBuffer() {
-    VkDeviceSize bufferSize = sizeof(m_Indices[0]) * m_Indices.size();
+// void VulkanContext::CreateIndexBuffer() {
+//     VkDeviceSize bufferSize = sizeof(m_Indices[0]) * m_Indices.size();
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
-                 stagingBuffer, stagingBufferMemory);
+//     VkBuffer stagingBuffer;
+//     VkDeviceMemory stagingBufferMemory;
+//     CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+//                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+//                  stagingBuffer, stagingBufferMemory);
 
-    void* data;
-    vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, m_Indices.data(), (size_t)bufferSize);
-    vkUnmapMemory(m_Device, stagingBufferMemory);
+//     void* data;
+//     vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
+//     memcpy(data, m_Indices.data(), (size_t)bufferSize);
+//     vkUnmapMemory(m_Device, stagingBufferMemory);
 
-    CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
-                 m_IndexBuffer, m_IndexBufferMemory);
+//     CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 
+//                  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+//                  m_IndexBuffer, m_IndexBufferMemory);
 
-    CopyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
+//     CopyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
 
-    vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-    vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
+//     vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
+//     vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
 
-    HR_LOG_INFO("VulkanContext: Index Buffer created and loaded into VRAM.");
-}
+//     HR_LOG_INFO("VulkanContext: Index Buffer created and loaded into VRAM.");
+// }
 
 void VulkanContext::CreateDescriptorSetLayout() {
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
@@ -1307,8 +1313,8 @@ void VulkanContext::CreateDescriptorSets() {
         // 定义图像信息，指定具体的图像视图与采样器。
         VkDescriptorImageInfo imageInfo{};
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = m_TextureImageView;
-        imageInfo.sampler = m_TextureSampler;
+        imageInfo.imageView = m_AlbedoMap.GetImageView();
+        imageInfo.sampler = m_AlbedoMap.GetSampler();
 
         std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
@@ -1716,12 +1722,12 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     vkCmdBeginRenderPass(m_CommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
 
-    VkBuffer vertexBuffers[] = {m_VertexBuffer};
+    VkBuffer vertexBuffers[] = {m_MainModel.GetVertexBuffer()};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
-    vkCmdBindIndexBuffer(m_CommandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdBindIndexBuffer(m_CommandBuffer, m_MainModel.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
     vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[imageIndex], 0, nullptr);
-    vkCmdDrawIndexed(m_CommandBuffer, static_cast<uint32_t>(m_Indices.size()), 1, 0, 0, 0);
+    vkCmdDrawIndexed(m_CommandBuffer, m_MainModel.GetIndexCount(), 1, 0, 0, 0);
 
     // 结束离屏渲染 Pass，开始后处理 Pass
     vkCmdEndRenderPass(m_CommandBuffer);
@@ -1826,12 +1832,14 @@ void VulkanContext::Cleanup() {
     // vkDestroyDescriptorPool(m_Device, m_ImGuiDescriptorPool, nullptr);
     // HR_LOG_INFO("VulkanContext: ImGui resources destroyed.");
 
-    if (m_TextureSampler != VK_NULL_HANDLE) vkDestroySampler(m_Device, m_TextureSampler, nullptr);
-    if (m_TextureImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_TextureImageView, nullptr);
-    if (m_TextureImage != VK_NULL_HANDLE) {
-        vkDestroyImage(m_Device, m_TextureImage, nullptr);
-        vkFreeMemory(m_Device, m_TextureImageMemory, nullptr);
-    }
+    // if (m_TextureSampler != VK_NULL_HANDLE) vkDestroySampler(m_Device, m_TextureSampler, nullptr);
+    // if (m_TextureImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_TextureImageView, nullptr);
+    // if (m_TextureImage != VK_NULL_HANDLE) {
+    //     vkDestroyImage(m_Device, m_TextureImage, nullptr);
+    //     vkFreeMemory(m_Device, m_TextureImageMemory, nullptr);
+    // }
+
+    m_AlbedoMap.Cleanup(m_Device);
 
     if (m_ImageAvailableSemaphore != VK_NULL_HANDLE) {
         vkDestroySemaphore(m_Device, m_ImageAvailableSemaphore, nullptr);
@@ -1840,17 +1848,19 @@ void VulkanContext::Cleanup() {
         HR_LOG_INFO("VulkanContext: Sync objects destroyed.");
     }
 
-    if (m_VertexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
-        vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr);
-        HR_LOG_INFO("VulkanContext: Vertex Buffer destroyed.");
-    }
+    // if (m_VertexBuffer != VK_NULL_HANDLE) {
+    //     vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
+    //     vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr);
+    //     HR_LOG_INFO("VulkanContext: Vertex Buffer destroyed.");
+    // }
 
-    if (m_IndexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
-        vkFreeMemory(m_Device, m_IndexBufferMemory, nullptr);
-        HR_LOG_INFO("VulkanContext: Index Buffer destroyed.");
-    }
+    // if (m_IndexBuffer != VK_NULL_HANDLE) {
+    //     vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
+    //     vkFreeMemory(m_Device, m_IndexBufferMemory, nullptr);
+    //     HR_LOG_INFO("VulkanContext: Index Buffer destroyed.");
+    // }
+
+    m_MainModel.Cleanup(m_Device);
 
     if (m_CommandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
