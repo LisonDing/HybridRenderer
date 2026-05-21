@@ -76,7 +76,7 @@ namespace UI {
         ImGui::NewFrame();
     }
 
-    void ImGuiLayer::RenderControlPanel(glm::vec3& lightDir, float& ambient, float& specular, float& exposure, float& vignette) {
+    void ImGuiLayer::RenderControlPanel(glm::vec3& lightDir, float& metallic, float& roughness, float& exposure, float& vignette) {
         ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Once);
         ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_Once);
 
@@ -86,8 +86,11 @@ namespace UI {
         
         ImGui::Text("Lighting Settings");
         ImGui::SliderFloat3("Light Dir", &lightDir.x, -10.0f, 10.0f);
-        ImGui::SliderFloat("Ambient Strength", &ambient, 0.0f, 1.0f);
-        ImGui::SliderFloat("Specular Strength", &specular, 0.0f, 2.0f);
+        ImGui::Separator();
+
+        ImGui::Text("PBR Materials");
+        ImGui::SliderFloat("Metallic", &metallic, 0.0f, 1.0f);
+        ImGui::SliderFloat("Roughness", &roughness, 0.05f, 1.0f); // 避免完全光滑的表面导致的渲染问题
         ImGui::Separator();
         
         ImGui::Text("Post-Processing");

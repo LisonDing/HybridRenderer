@@ -5,12 +5,12 @@
 namespace Core {
 
     Application::Application() 
-        : m_Camera(glm::vec3(0.0f, 0.0f, 0.0f), 4.0f),
+        : m_Camera(glm::vec3(0.0f, 100.0f, 0.0f), 0.1f, 0.0f, 0.0f),
           m_LastX(400.0f), m_LastY(300.0f), m_IsDragging(false),
           m_ClickAnchorX(400.0), m_ClickAnchorY(300.0), m_IgnoreFirstDelta(false),
           m_DeltaTime(0.0f), m_LastFrame(0.0f),
-          m_LightDir(glm::vec3(5.0f, 10.0f, 3.0f)), m_AmbientStrength(0.5f), 
-          m_SpecularStrength(0.5f), m_Exposure(1.0f), m_VignetteStrength(0.5f) {
+          m_LightDir(glm::vec3(5.0f, 10.0f, 3.0f)), m_Metallic(0.5f), 
+          m_Roughness(0.5f), m_Exposure(1.0f), m_VignetteStrength(0.5f) {
     }
 
     Application::~Application() {
@@ -75,8 +75,10 @@ namespace Core {
         m_VkContext.CreateSyncObjects();
 
         // Phase 3: Assets
-        m_VkContext.LoadTexture("../assets/textures/viking_room.png");
-        m_VkContext.LoadModel("../assets/models/viking_room.obj");
+        m_VkContext.LoadTextures({"../assets/textures/viking_room.png"}, {"../assets/textures/normalMap_test.jpeg"});
+        // m_VkContext.LoadTextures({"../assets/textures/viking_room.png"}, nullptr);
+        // m_VkContext.LoadModel("../assets/models/viking_room.obj");
+        m_VkContext.LoadModel("../assets/models/Sponza/glTF/Sponza.gltf");
         m_VkContext.CreateUniformBuffers();
         m_VkContext.CreatePostProcessPipeline();
         m_VkContext.CreateDescriptorPool();
@@ -98,14 +100,14 @@ namespace Core {
 
             // 1. UI 渲染逻辑
             m_ImGuiLayer.NewFrame();
-            m_ImGuiLayer.RenderControlPanel(m_LightDir, m_AmbientStrength, m_SpecularStrength, m_Exposure, m_VignetteStrength);
+            m_ImGuiLayer.RenderControlPanel(m_LightDir, m_Metallic, m_Roughness, m_Exposure, m_VignetteStrength);
 
             // 2. 矩阵计算
             glm::mat4 view = m_Camera.GetViewMatrix();
-            glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)m_Width / (float)m_Height, 0.1f, 100.0f);
+            glm::mat4 proj = glm::perspective(glm::radians(75.0f), (float)m_Width / (float)m_Height, 0.1f, 2000.0f);
 
             // 3. 将 UI 绘制回调动态注入到管线渲染中
-            m_VkContext.DrawFrame(view, proj, m_Camera.Position, m_LightDir, m_AmbientStrength, m_SpecularStrength, m_Exposure, m_VignetteStrength, [&](VkCommandBuffer cmd) {
+            m_VkContext.DrawFrame(view, proj, m_Camera.Position, m_LightDir, m_Metallic, m_Roughness, m_Exposure, m_VignetteStrength, [&](VkCommandBuffer cmd) {
                 m_ImGuiLayer.RenderDrawData(cmd);
             });
         }
@@ -163,7 +165,7 @@ namespace Core {
             app->m_LastY = ypos;
 
             if (isShiftPressed) {
-                app->m_Camera.ProcessPan(xoffset, yoffset);
+                app->m_Camera.ProcessPan(xoffset * 30.0f, yoffset * 30.0f);
             } else {
                 app->m_Camera.ProcessOrbit(xoffset, yoffset);
             }
@@ -179,7 +181,7 @@ namespace Core {
     void Application::ScrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
         if (UI::ImGuiLayer::WantCaptureMouse()) return;
         auto app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
-        app->m_Camera.ProcessZoom(static_cast<float>(yoffset), 0.8f);
+        app->m_Camera.ProcessZoom(static_cast<float>(yoffset), 5.0f);
     }
 
 } // namespace Core

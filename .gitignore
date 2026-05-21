@@ -9,6 +9,7 @@ cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 external/imgui/
+assets/models/Sponza/
 
 # Mac OS specific
 .DS_Store

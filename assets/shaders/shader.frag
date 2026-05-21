@@ -4,6 +4,7 @@ layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragNormal;
 layout(location = 3) in vec3 fragPos;
+layout(location = 4) in vec3 fragTangent; // 接收切线向量以便在片段着色器中计算切线空间的法线贴图
 
 // // Uniform buffer object containing transformation matrices and lighting information.
 // // 包含变换矩阵和光照信息的统一缓冲对象 (占用 binding 0 槽位)。
@@ -54,20 +55,46 @@ layout(location = 3) in vec3 fragPos;
 // 片段着色器接受来自顶点着色器的多个输出（颜色、纹理坐标、法线、位置），并将计算结果写入多个渲染目标（G-Buffer）。
 
 // 采样基础纹理
-layout(binding = 1) uniform sampler2D texSampler;
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+    vec3 lightDir;
+    vec3 viewPos;
+    float metallic;  // 接收金属度
+    float roughness; // 接收粗糙度
+} ubo;
+// layout(binding = 1) uniform sampler2D texSampler;
+// layout(binding = 2) uniform sampler2D normalMap;
+
+// 暂时保留绑定的贴图，防止 Vulkan 报错，但我们先不采样它们
+layout(binding = 1) uniform sampler2D albedoMap;
+layout(binding = 2) uniform sampler2D normalMap;
 
 layout(location = 0) out vec4 outPosition; // G-Buffer 1: 存储世界空间位置
 layout(location = 1) out vec4 outNormal;   // G-Buffer 2: 存储法线信息
 layout(location = 2) out vec4 outAlbedo;   // G-Buffer 3: 存储颜色（反照率）
 
+
+// 【新增】：使用 Push Constants 接收当前部件的材质基底属性
+layout(push_constant) uniform MaterialPushConstant {
+    vec4 baseColorFactor;
+    float metallicFactor;
+    float roughnessFactor;
+} matPC;
+
 void main() {
-    // 写入世界坐标位置到 G-Buffer 1
     outPosition = vec4(fragPos, 1.0);
-
-    // 写入法线信息到 G-Buffer 2
-    outNormal = vec4(normalize(fragNormal), 1.0);
-
-    // 写入颜色信息到 G-Buffer 3（结合基础纹理和顶点颜色）
-    vec3 albedo = texture(texSampler, fragTexCoord).rgb * fragColor;
-    outAlbedo = vec4(albedo, 1.0);
+    
+    // 【白模模式】：暂时不用法线贴图，直接使用平滑的顶点法线
+    vec3 worldNormal = normalize(fragNormal);
+    
+    // 将 Push Constant 传来的金属度打包进法线的 Alpha 通道
+    outNormal = vec4(worldNormal, matPC.metallicFactor);
+    
+    // 【白模模式】：不采样 Albedo 贴图，直接使用 GLTF 材质里的 BaseColor
+    vec3 albedo = matPC.baseColorFactor.rgb;
+    
+    // 将 Push Constant 传来的粗糙度打包进颜色的 Alpha 通道
+    outAlbedo = vec4(albedo, matPC.roughnessFactor);
 }

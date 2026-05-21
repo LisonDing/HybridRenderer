@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 // #define STB_IMAGE_IMPLEMENTATION
 // #include <stb_image.h>
 // #define TINYOBJLOADER_IMPLEMENTATION
@@ -496,15 +497,25 @@ void VulkanContext::CreateGraphicsPipeline() {
     colorBlending.attachmentCount = static_cast<uint32_t>(blendAttachments.size());
     colorBlending.pAttachments = blendAttachments.data();
 
+    // 【新增】：配置 Push Constant 的大小和阶段
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    // 大小：vec4 (16字节) + 2个float (8字节) = 24 字节
+    pushConstantRange.size = sizeof(glm::vec4) + sizeof(float) * 2;
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &m_DescriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
         HR_LOG_ERROR("VulkanContext: Failed to create pipeline layout!");
         return;
     }
+
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -803,8 +814,9 @@ void VulkanContext::GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t
     HR_LOG_INFO("VulkanContext: Mipmaps generated for texture image.");
 }
 
-void VulkanContext::LoadTexture(const std::string& path) {
-    m_AlbedoMap.LoadFromFile(path, *this);
+void VulkanContext::LoadTextures(const std::string& albedoPath, const std::string& normalPath) {
+    m_AlbedoMap.LoadFromFile(albedoPath, *this);
+    m_NormalMap.LoadFromFile(normalPath, *this);
 }
 
 // void VulkanContext::CreateTextureImage() {
@@ -1011,7 +1023,11 @@ void VulkanContext::LoadTexture(const std::string& path) {
 // }
 
 void VulkanContext::LoadModel(const std::string& path) {
-    m_MainModel.LoadFromFile(path, *this);
+    if (!m_MainModel.LoadGLTF(path, *this)) {
+        // 如果文件加载失败，直接强行停止引擎，防止后续显卡发生段错误！
+        HR_LOG_ERROR("FATAL: Failed to load main model. Halting execution.");
+        exit(EXIT_FAILURE); 
+    }
 }
 
 // 深度控制
@@ -1215,8 +1231,17 @@ void VulkanContext::CreateDescriptorSetLayout() {
     samplerLayoutBinding.pImmutableSamplers = nullptr;
     samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
-    
+    // New binding for the Normal Map Sampler at index 2.
+    // 针对索引 2 新增的法线贴图采样器绑定。
+    VkDescriptorSetLayoutBinding normalMapLayoutBinding{};
+    normalMapLayoutBinding.binding = 2;
+    normalMapLayoutBinding.descriptorCount = 1;
+    normalMapLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    normalMapLayoutBinding.pImmutableSamplers = nullptr;
+    normalMapLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {uboLayoutBinding, samplerLayoutBinding, normalMapLayoutBinding};
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -1246,7 +1271,7 @@ void VulkanContext::CreateUniformBuffers() {
     }
 }
 
-void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos, const glm::vec3& lightDir, float ambientStrength, float specularStrength) {
+void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos, const glm::vec3& lightDir, float metallic, float roughness) {
     UniformBufferObject ubo{};
     
     // Model remains static at the center of the world.
@@ -1265,8 +1290,8 @@ void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& 
     // 光照与视角
     ubo.lightDir = lightDir;
     ubo.viewPos = viewPos;
-    ubo.ambientStrength = ambientStrength;
-    ubo.specularStrength = specularStrength;
+    ubo.metallic = metallic;
+    ubo.roughness = roughness;
 
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
@@ -1274,9 +1299,9 @@ void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& 
 void VulkanContext::CreateDescriptorPool() {
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 2);
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 4);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 4); // 3D 渲染和后处理都需要采样器描述符
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 8); // 3D 渲染和后处理都需要采样器描述符
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1316,7 +1341,12 @@ void VulkanContext::CreateDescriptorSets() {
         imageInfo.imageView = m_AlbedoMap.GetImageView();
         imageInfo.sampler = m_AlbedoMap.GetSampler();
 
-        std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+        VkDescriptorImageInfo normalMapInfo{};
+        normalMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        normalMapInfo.imageView = m_NormalMap.GetImageView();
+        normalMapInfo.sampler = m_NormalMap.GetSampler();
+
+        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
 
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = m_DescriptorSets[i];
@@ -1333,6 +1363,14 @@ void VulkanContext::CreateDescriptorSets() {
         descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         descriptorWrites[1].descriptorCount = 1;
         descriptorWrites[1].pImageInfo = &imageInfo;
+
+        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[2].dstSet = m_DescriptorSets[i];
+        descriptorWrites[2].dstBinding = 2;
+        descriptorWrites[2].dstArrayElement = 0; 
+        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[2].descriptorCount = 1;
+        descriptorWrites[2].pImageInfo = &normalMapInfo;
 
         vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
     }
@@ -1684,7 +1722,7 @@ void VulkanContext::CreatePostProcessPipeline() {
     HR_LOG_INFO("VulkanContext: Post-Process Pipeline created.");
 }
 
-void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float ambientStrength, float specularStrength, float exposure, float vignette, std::function<void(VkCommandBuffer)> uiRenderCallback) {
+void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float metallic, float roughness, float exposure, float vignette, std::function<void(VkCommandBuffer)> uiRenderCallback) {
     // Wait for the previous frame to finish GPU execution.
     // 等待上一帧的 GPU 渲染执行完毕。
     vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
@@ -1692,7 +1730,7 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
 
     uint32_t imageIndex;
     vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);    
-    UpdateUniformBuffer(imageIndex, view, proj, viewPos, lightDir, ambientStrength, specularStrength);
+    UpdateUniformBuffer(imageIndex, view, proj, viewPos, lightDir, metallic, roughness);
     
     vkResetCommandBuffer(m_CommandBuffer, 0);
 
@@ -1727,7 +1765,32 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
     vkCmdBindIndexBuffer(m_CommandBuffer, m_MainModel.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
     vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[imageIndex], 0, nullptr);
-    vkCmdDrawIndexed(m_CommandBuffer, m_MainModel.GetIndexCount(), 1, 0, 0, 0);
+    // vkCmdDrawIndexed(m_CommandBuffer, m_MainModel.GetIndexCount(), 1, 0, 0, 0);
+
+    // 【核心魔法】：遍历并绘制每一个 SubMesh
+    const auto& subMeshes = m_MainModel.GetSubMeshes();
+    const auto& materials = m_MainModel.GetMaterials();
+
+    for (const auto& subMesh : subMeshes) {
+        // 1. 获取当前部件的材质
+        const auto& mat = materials[subMesh.materialIndex];
+
+        // 2. 准备推送数据
+        struct {
+            glm::vec4 baseColor;
+            float metallic;
+            float roughness;
+        } pcData;
+        pcData.baseColor = mat.baseColorFactor;
+        pcData.metallic = mat.metallicFactor;
+        pcData.roughness = mat.roughnessFactor;
+
+        // 3. 将材质数据通过 Push Constant 闪电般推入显卡
+        vkCmdPushConstants(m_CommandBuffer, m_PipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcData), &pcData);
+
+        // 4. 仅绘制当前 SubMesh 所属的那一段 Index Buffer！
+        vkCmdDrawIndexed(m_CommandBuffer, subMesh.indexCount, 1, subMesh.firstIndex, 0, 0);
+    }
 
     // 结束离屏渲染 Pass，开始后处理 Pass
     vkCmdEndRenderPass(m_CommandBuffer);

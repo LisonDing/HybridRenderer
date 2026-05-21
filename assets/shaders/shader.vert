@@ -18,6 +18,7 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec3 inNormal; // 接收法线
+layout(location = 4) in vec3 inTangent; // 接收切线
 
 // Output color data to the fragment shader.
 // 传递至片段着色器的输出颜色数据。
@@ -25,6 +26,7 @@ layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) out vec3 fragNormal;
 layout(location = 3) out vec3 fragPos; // 传递世界坐标系下的位置给片段着色器计算光照
+layout(location = 4) out vec3 fragTangent; // 传递切线给片段着色器计算切线空间的法线贴图
 
 void main() {
     // Compute world position of the vertex.
@@ -41,9 +43,11 @@ void main() {
     // 将 UV 坐标透传至片段着色器。
     fragTexCoord = inTexCoord;
 
-    // Pass normal vector to the fragment shader for lighting calculations.
-    // 将法线向量透传至片段着色器以进行光照计算。
-    fragNormal = mat3(transpose(inverse(ubo.model))) * inNormal; // 法线变换：使用模型矩阵的逆转置矩阵来正确变换
+    // 将法线和切线变换到世界空间
+    mat3 normalMatrix = mat3(transpose(inverse(ubo.model)));
+    fragNormal = normalMatrix * inNormal;
+    fragTangent = normalMatrix * inTangent; // 透传切线向量以便在片段着色器中计算切线空间的法线贴图
+
     // Pass world position to the fragment shader for lighting calculations.
     // 将世界坐标位置透传至片段着色器以进行光照计算。
     fragPos = worldPosition.xyz;

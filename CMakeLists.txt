@@ -46,24 +46,21 @@ if(NOT EXISTS ${STB_IMAGE_FILE})
     )
 endif()
 
-# 5. 自动下载tinyobjloader (单头文件库，用于加载 OBJ 模型)
-set(TINYOBJ_DIR "${CMAKE_SOURCE_DIR}/external/tinyobjloader")
-set(TINYOBJ_FILE "${TINYOBJ_DIR}/tiny_obj_loader.h")
+# 5. 自动下载 tinygltf (用于解析现代 PBR 工业标准模型)
+set(TINYGLTF_DIR "${CMAKE_SOURCE_DIR}/external/tinygltf")
+set(TINYGLTF_FILE "${TINYGLTF_DIR}/tiny_gltf.h")
+set(JSON_FILE "${TINYGLTF_DIR}/json.hpp") # tinygltf 依赖 nlohmann/json
 
-if(NOT EXISTS ${TINYOBJ_FILE})
-    file(MAKE_DIRECTORY ${TINYOBJ_DIR})
-    message(STATUS "Downloading tiny_obj_loader.h from GitHub master branch...")
-    file(DOWNLOAD 
-        "https://raw.githubusercontent.com/tinyobjloader/tinyobjloader/master/tiny_obj_loader.h" 
-        ${TINYOBJ_FILE}
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS # 捕获下载状态
-    )
-    # 如果下载失败，在终端报错提示
-    list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
-    if(NOT STATUS_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download tinyobjloader. Please check your network or download it manually.")
-    endif()
+if(NOT EXISTS ${TINYGLTF_FILE})
+    file(MAKE_DIRECTORY ${TINYGLTF_DIR})
+    message(STATUS "Downloading tiny_gltf.h from GitHub...")
+    file(DOWNLOAD "https://raw.githubusercontent.com/syoyo/tinygltf/master/tiny_gltf.h" ${TINYGLTF_FILE} SHOW_PROGRESS)
+    
+    message(STATUS "Downloading json.hpp for tinygltf...")
+    file(DOWNLOAD "https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp" ${JSON_FILE} SHOW_PROGRESS)
+    
+    # tinygltf 还需要 stb_image_write.h
+    file(DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h" "${CMAKE_SOURCE_DIR}/external/stb/stb_image_write.h" SHOW_PROGRESS)
 endif()
 
 # Dear ImGui (Docking GUI 库)
@@ -93,6 +90,7 @@ set(CORE_SOURCES
     "src/main.cpp"
     "src/Core/Logger.h"
     "src/Core/Camera.h"
+    "src/Core/Camera.cpp"
     "src/Core/Application.cpp"
     "src/Core/Application.h"
 )

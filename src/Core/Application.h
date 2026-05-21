@@ -32,8 +32,8 @@ namespace Core {
 
         // 系统核心模块
         GLFWwindow* m_Window;
-        uint32_t m_Width = 800;
-        uint32_t m_Height = 600;
+        uint32_t m_Width = 1080;
+        uint32_t m_Height = 720;
 
         Renderer::VulkanContext m_VkContext;
         UI::ImGuiLayer m_ImGuiLayer;
@@ -52,8 +52,8 @@ namespace Core {
 
         // UI 渲染参数
         glm::vec3 m_LightDir;
-        float m_AmbientStrength;
-        float m_SpecularStrength;
+        float m_Metallic;
+        float m_Roughness;
         float m_Exposure;
         float m_VignetteStrength;
     };

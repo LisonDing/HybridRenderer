@@ -105,8 +105,10 @@ struct UniformBufferObject {
     alignas(16) glm::vec3 viewPos;  // 【新增】摄像机世界坐标
 
     // 光照控制参数
-    alignas(4) float ambientStrength; // 环境光强度
-    alignas(4) float specularStrength; // 镜面光强度
+    // alignas(4) float ambientStrength; // 环境光强度
+    // alignas(4) float specularStrength; // 镜面光强度
+    alignas(4) float metallic;  // 【PBR】金属度
+    alignas(4) float roughness; // 【PBR】粗糙度
 };
 
 // Stores the indices of available Vulkan queue families.
@@ -178,7 +180,7 @@ public:
     // void CreateTextureImage();
     // void CreateTextureImageView();
     // void CreateTextureSampler();
-    void LoadTexture(const std::string& path);
+    void LoadTextures(const std::string& albedoPath, const std::string& normalPath);
 
     // --- Depth Testing & Blending ---
     void CreateDepthResources();
@@ -198,7 +200,7 @@ public:
     void CreatePostProcessPipeline();
 
     // --- Execution ---
-    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float ambientStrength, float specularStrength, float exposure, float vignette,std::function<void(VkCommandBuffer)> uiRenderCallback = nullptr); 
+    void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float metallic, float roughness, float exposure, float vignette,std::function<void(VkCommandBuffer)> uiRenderCallback = nullptr); 
     void Cleanup();
 
 private:
@@ -250,6 +252,7 @@ private:
     // VkImageView    m_TextureImageView = VK_NULL_HANDLE;
     // VkSampler      m_TextureSampler = VK_NULL_HANDLE;
     Resource::Texture2D m_AlbedoMap;
+    Resource::Texture2D m_NormalMap;
 
     // // Model Data
     // // 模型数据

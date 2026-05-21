@@ -1,124 +1,194 @@
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <tiny_obj_loader.h>
+// 【核心架构魔法】：禁止 tinygltf 自行解码图片，防止与我们的 Texture 类产生 stb_image 宏冲突！
+#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_NO_STB_IMAGE 
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#define TINYGLTF_NO_EXTERNAL_IMAGE
+#include "../external/tinygltf/tiny_gltf.h"
 
 #include "Model.h"
 #include "../Renderer/VulkanContext.h"
 #include "../Core/Logger.h"
-#include <unordered_map>
-#include <cstring>
-#include <algorithm>
+#include <iostream>
 
 namespace Resource {
 
-    bool Model::LoadFromFile(const std::string& path, Renderer::VulkanContext& vkContext) {
-        tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-        std::string warn, err;
+    bool Model::LoadGLTF(const std::string& path, Renderer::VulkanContext& vkContext) {
+        tinygltf::Model gltfModel;
+        tinygltf::TinyGLTF loader;
+        std::string err, warn;
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str())) {
-            HR_LOG_ERROR("Model: Failed to load " + path + " " + warn + err);
-            return false;
+        HR_LOG_INFO("Model: Parsing glTF file -> " + path);
+        bool ret = loader.LoadASCIIFromFile(&gltfModel, &err, &warn, path);
+        if (!warn.empty()) HR_LOG_INFO("glTF Warn: " + warn);
+        if (!err.empty()) HR_LOG_ERROR("glTF Error: " + err);
+        if (!ret) return false;
+
+        // 获取文件所在目录，用于拼接贴图的绝对路径
+        std::string baseDir = path.substr(0, path.find_last_of('/') + 1);
+
+        // ==========================================
+        // 1. 解析材质 (Materials & Textures)
+        // ==========================================
+        for (const auto& mat : gltfModel.materials) {
+            Material material{};
+            material.name = mat.name;
+
+            // 提取 PBR 基础参数
+            if (mat.pbrMetallicRoughness.baseColorFactor.size() == 4) {
+                material.baseColorFactor = glm::make_vec4(mat.pbrMetallicRoughness.baseColorFactor.data());
+            }
+            material.metallicFactor = mat.pbrMetallicRoughness.metallicFactor;
+            material.roughnessFactor = mat.pbrMetallicRoughness.roughnessFactor;
+
+            // 提取 Albedo 贴图路径
+            int baseColorTexIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
+            if (baseColorTexIndex >= 0) {
+                int imageIndex = gltfModel.textures[baseColorTexIndex].source;
+                material.albedoMapPath = baseDir + gltfModel.images[imageIndex].uri;
+            }
+
+            // 提取 Normal 贴图路径
+            int normalTexIndex = mat.normalTexture.index;
+            if (normalTexIndex >= 0) {
+                int imageIndex = gltfModel.textures[normalTexIndex].source;
+                material.normalMapPath = baseDir + gltfModel.images[imageIndex].uri;
+            }
+
+            // 提取 Metallic/Roughness 贴图路径
+            int mrTexIndex = mat.pbrMetallicRoughness.metallicRoughnessTexture.index;
+            if (mrTexIndex >= 0) {
+                int imageIndex = gltfModel.textures[mrTexIndex].source;
+                material.metallicRoughnessMapPath = baseDir + gltfModel.images[imageIndex].uri;
+            }
+
+            m_Materials.push_back(material);
         }
 
-        std::vector<Renderer::Vertex> vertices;
-        std::vector<uint32_t> indices;
-        std::unordered_map<Renderer::Vertex, uint32_t> uniqueVertices{};
+        // ==========================================
+        // 2. 解析几何数据 (Meshes & Accessors)
+        // ==========================================
+        std::vector<Renderer::Vertex> globalVertices;
+        std::vector<uint32_t> globalIndices;
 
-        glm::vec3 minBounds(FLT_MAX);
-        glm::vec3 maxBounds(-FLT_MAX);
+        for (const auto& mesh : gltfModel.meshes) {
+            for (const auto& primitive : mesh.primitives) {
+                SubMesh subMesh{};
+                subMesh.firstIndex = static_cast<uint32_t>(globalIndices.size());
+                subMesh.materialIndex = primitive.material >= 0 ? primitive.material : 0;
 
-        for (const auto& shape : shapes) {
-            for (size_t i = 0; i < shape.mesh.indices.size(); i += 3) {
-                auto idx0 = shape.mesh.indices[i + 0];
-                auto idx1 = shape.mesh.indices[i + 1];
-                auto idx2 = shape.mesh.indices[i + 2];
+                uint32_t vertexStart = static_cast<uint32_t>(globalVertices.size());
 
-                glm::vec3 pos0 = {attrib.vertices[3 * idx0.vertex_index + 0], attrib.vertices[3 * idx0.vertex_index + 1], attrib.vertices[3 * idx0.vertex_index + 2]};
-                glm::vec3 pos1 = {attrib.vertices[3 * idx1.vertex_index + 0], attrib.vertices[3 * idx1.vertex_index + 1], attrib.vertices[3 * idx1.vertex_index + 2]};
-                glm::vec3 pos2 = {attrib.vertices[3 * idx2.vertex_index + 0], attrib.vertices[3 * idx2.vertex_index + 1], attrib.vertices[3 * idx2.vertex_index + 2]};
-                
-                glm::vec3 edge1 = pos1 - pos0;
-                glm::vec3 edge2 = pos2 - pos0;
-                glm::vec3 faceNormal = glm::normalize(glm::cross(edge1, edge2));
-
-                tinyobj::index_t indices_array[3] = {idx0, idx1, idx2};
-
-                for (int j = 0; j < 3; ++j) {
-                    auto index = indices_array[j];
-                    Renderer::Vertex vertex{};
-                    vertex.pos = {attrib.vertices[3 * index.vertex_index + 0], attrib.vertices[3 * index.vertex_index + 1], attrib.vertices[3 * index.vertex_index + 2]};
-                    
-                    minBounds = glm::min(minBounds, vertex.pos);
-                    maxBounds = glm::max(maxBounds, vertex.pos);
-
-                    if (index.texcoord_index >= 0) {
-                        vertex.texCoord = {attrib.texcoords[2 * index.texcoord_index + 0], 1.0f - attrib.texcoords[2 * index.texcoord_index + 1]};
-                    } 
-
-                    if (attrib.normals.size() > 0 && index.normal_index >= 0) {
-                        vertex.normal = {attrib.normals[3 * index.normal_index + 0], attrib.normals[3 * index.normal_index + 1], attrib.normals[3 * index.normal_index + 2]};
-                    } else {
-                        vertex.normal = faceNormal;
-                    }
-
-                    vertex.color = {1.0f, 1.0f, 1.0f};
-
-                    if (uniqueVertices.count(vertex) == 0) {
-                        uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
-                        vertices.push_back(vertex);
-                    }
-                    indices.push_back(uniqueVertices[vertex]);
+                // --- 提取顶点位置 (Position) ---
+                const float* positionBuffer = nullptr;
+                size_t vertexCount = 0;
+                if (primitive.attributes.find("POSITION") != primitive.attributes.end()) {
+                    const tinygltf::Accessor& accessor = gltfModel.accessors[primitive.attributes.at("POSITION")];
+                    const tinygltf::BufferView& view = gltfModel.bufferViews[accessor.bufferView];
+                    positionBuffer = reinterpret_cast<const float*>(&(gltfModel.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
+                    vertexCount = accessor.count;
                 }
+
+                // --- 提取法线 (Normal) ---
+                const float* normalBuffer = nullptr;
+                if (primitive.attributes.find("NORMAL") != primitive.attributes.end()) {
+                    const tinygltf::Accessor& accessor = gltfModel.accessors[primitive.attributes.at("NORMAL")];
+                    const tinygltf::BufferView& view = gltfModel.bufferViews[accessor.bufferView];
+                    normalBuffer = reinterpret_cast<const float*>(&(gltfModel.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
+                }
+
+                // --- 提取 UV (TexCoord) ---
+                const float* uvBuffer = nullptr;
+                if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end()) {
+                    const tinygltf::Accessor& accessor = gltfModel.accessors[primitive.attributes.at("TEXCOORD_0")];
+                    const tinygltf::BufferView& view = gltfModel.bufferViews[accessor.bufferView];
+                    uvBuffer = reinterpret_cast<const float*>(&(gltfModel.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
+                }
+
+                // 装配该 SubMesh 的所有顶点
+                for (size_t v = 0; v < vertexCount; ++v) {
+                    Renderer::Vertex vertex{};
+                    vertex.pos = glm::vec3(positionBuffer[v * 3], positionBuffer[v * 3 + 1], positionBuffer[v * 3 + 2]);
+                    
+                    // // Sponza 模型非常大，缩小 100 倍以便在我们的摄像机里观看
+                    // vertex.pos *= 0.01f; 
+
+                    vertex.normal = normalBuffer ? glm::vec3(normalBuffer[v * 3], normalBuffer[v * 3 + 1], normalBuffer[v * 3 + 2]) : glm::vec3(0.0f, 1.0f, 0.0f);
+                    vertex.texCoord = uvBuffer ? glm::vec2(uvBuffer[v * 2], uvBuffer[v * 2 + 1]) : glm::vec2(0.0f);
+                    vertex.color = glm::vec3(1.0f);
+                    
+                    // 暂时将切线硬编码，下一回合我们会引入微积分计算
+                    vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f); 
+
+                    globalVertices.push_back(vertex);
+                }
+
+                // --- 提取索引 (Indices) ---
+                if (primitive.indices >= 0) {
+                    const tinygltf::Accessor& accessor = gltfModel.accessors[primitive.indices];
+                    const tinygltf::BufferView& view = gltfModel.bufferViews[accessor.bufferView];
+                    const void* dataPtr = &(gltfModel.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]);
+
+                    subMesh.indexCount = static_cast<uint32_t>(accessor.count);
+
+                    // glTF 的索引可能是 16 位也可能是 32 位，必须分别处理
+                    if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                        const uint16_t* buf = static_cast<const uint16_t*>(dataPtr);
+                        for (size_t index = 0; index < accessor.count; index++) {
+                            globalIndices.push_back(buf[index] + vertexStart);
+                        }
+                    } else if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
+                        const uint32_t* buf = static_cast<const uint32_t*>(dataPtr);
+                        for (size_t index = 0; index < accessor.count; index++) {
+                            globalIndices.push_back(buf[index] + vertexStart);
+                        }
+                    }
+                }
+                
+                m_SubMeshes.push_back(subMesh);
             }
         }
 
-        // 居中与缩放标准化
-        glm::vec3 center = (minBounds + maxBounds) / 2.0f;
-        glm::vec3 extents = maxBounds - minBounds;
-        float maxDim = std::max(extents.x, std::max(extents.y, extents.z));
-        for (auto& v : vertices) {
-            v.pos = (v.pos - center) / maxDim * 2.0f;
-        }
+        m_IndexCount = static_cast<uint32_t>(globalIndices.size());
 
-        m_IndexCount = static_cast<uint32_t>(indices.size());
-
-        // 1. 创建 Vertex Buffer (交由底层 RHI 处理显存)
-        VkDeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
+        // ==========================================
+        // 3. 上传数据到 Vulkan 显存
+        // ==========================================
+        // 顶点缓冲 (Vertex Buffer)
+        VkDeviceSize vertexBufferSize = sizeof(globalVertices[0]) * globalVertices.size();
         VkBuffer vertexStagingBuffer;
         VkDeviceMemory vertexStagingBufferMemory;
         vkContext.CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexStagingBuffer, vertexStagingBufferMemory);
 
         void* data;
         vkMapMemory(vkContext.GetDevice(), vertexStagingBufferMemory, 0, vertexBufferSize, 0, &data);
-        memcpy(data, vertices.data(), (size_t)vertexBufferSize);
+        memcpy(data, globalVertices.data(), (size_t)vertexBufferSize);
         vkUnmapMemory(vkContext.GetDevice(), vertexStagingBufferMemory);
 
         vkContext.CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_VertexBuffer, m_VertexBufferMemory);
         vkContext.CopyBuffer(vertexStagingBuffer, m_VertexBuffer, vertexBufferSize);
-
         vkDestroyBuffer(vkContext.GetDevice(), vertexStagingBuffer, nullptr);
         vkFreeMemory(vkContext.GetDevice(), vertexStagingBufferMemory, nullptr);
 
-        // 2. 创建 Index Buffer
-        VkDeviceSize indexBufferSize = sizeof(indices[0]) * indices.size();
+        // 索引缓冲 (Index Buffer)
+        VkDeviceSize indexBufferSize = sizeof(globalIndices[0]) * globalIndices.size();
         VkBuffer indexStagingBuffer;
         VkDeviceMemory indexStagingBufferMemory;
         vkContext.CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, indexStagingBuffer, indexStagingBufferMemory);
 
         vkMapMemory(vkContext.GetDevice(), indexStagingBufferMemory, 0, indexBufferSize, 0, &data);
-        memcpy(data, indices.data(), (size_t)indexBufferSize);
+        memcpy(data, globalIndices.data(), (size_t)indexBufferSize);
         vkUnmapMemory(vkContext.GetDevice(), indexStagingBufferMemory);
 
         vkContext.CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_IndexBuffer, m_IndexBufferMemory);
         vkContext.CopyBuffer(indexStagingBuffer, m_IndexBuffer, indexBufferSize);
-
         vkDestroyBuffer(vkContext.GetDevice(), indexStagingBuffer, nullptr);
         vkFreeMemory(vkContext.GetDevice(), indexStagingBufferMemory, nullptr);
 
-        HR_LOG_INFO("Model: Loaded successfully -> " + path + " (Verts: " + std::to_string(vertices.size()) + ")");
+        HR_LOG_INFO("Model: Sponza loaded! SubMeshes: " + std::to_string(m_SubMeshes.size()) + " | Materials: " + std::to_string(m_Materials.size()));
         return true;
-    }
+    };
+
+
 
     void Model::Cleanup(VkDevice device) {
         if (m_IndexBuffer != VK_NULL_HANDLE) {
