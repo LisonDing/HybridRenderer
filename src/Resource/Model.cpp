@@ -136,6 +136,14 @@ namespace Resource {
                     uvBuffer = reinterpret_cast<const float*>(&(gltfModel.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
                 }
 
+                // 【新增】：--- 提取切线 (Tangent) ---
+                const float* tangentBuffer = nullptr;
+                if (primitive.attributes.find("TANGENT") != primitive.attributes.end()) {
+                    const tinygltf::Accessor& accessor = gltfModel.accessors[primitive.attributes.at("TANGENT")];
+                    const tinygltf::BufferView& view = gltfModel.bufferViews[accessor.bufferView];
+                    tangentBuffer = reinterpret_cast<const float*>(&(gltfModel.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
+                }
+
                 // 装配该 SubMesh 的所有顶点
                 for (size_t v = 0; v < vertexCount; ++v) {
                     Renderer::Vertex vertex{};
@@ -148,8 +156,13 @@ namespace Resource {
                     vertex.texCoord = uvBuffer ? glm::vec2(uvBuffer[v * 2], uvBuffer[v * 2 + 1]) : glm::vec2(0.0f);
                     vertex.color = glm::vec3(1.0f);
                     
-                    // 暂时将切线硬编码，下一回合我们会引入微积分计算
-                    vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f); 
+                    // 【修改】：如果模型自带切线则读取，否则给一个默认值
+                    // 注意：glTF 标准中 TANGENT 是 vec4 (xyz 是方向，w 是副切线符号计算参数)，这里我们只取前 3 个 float
+                    if (tangentBuffer) {
+                        vertex.tangent = glm::vec3(tangentBuffer[v * 4], tangentBuffer[v * 4 + 1], tangentBuffer[v * 4 + 2]);
+                    } else {
+                        vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f); 
+                    }
 
                     globalVertices.push_back(vertex);
                 }

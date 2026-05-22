@@ -1385,19 +1385,23 @@ void VulkanContext::CreateDescriptorSets() {
         }
 
         // 【核心修复】：使用全局已加载好的 m_AlbedoMap 作为绝对安全的保底贴图，彻底告别空指针！
-        VkImageView fallbackView = m_AlbedoMap.GetImageView();
+        VkImageView fallbackAlbedoView = m_AlbedoMap.GetImageView();
+        VkImageView fallbackNormalView = m_NormalMap.GetImageView();
         VkSampler fallbackSampler = m_AlbedoMap.GetSampler();
 
         for (size_t i = 0; i < materials.size(); i++) {
             const auto& mat = materials[i];
 
-            VkImageView albedoView = mat.albedoTexture ? mat.albedoTexture->GetImageView() : fallbackView;
+            // 找不到 Albedo 时用 Albedo保底
+            VkImageView albedoView = mat.albedoTexture ? mat.albedoTexture->GetImageView() : fallbackAlbedoView;
             VkSampler albedoSampler = mat.albedoTexture ? mat.albedoTexture->GetSampler() : fallbackSampler;
 
-            VkImageView normalView = mat.normalTexture ? mat.normalTexture->GetImageView() : fallbackView;
+            // 找不到 Normal 时，【必须】用法线专用的保底！
+            VkImageView normalView = mat.normalTexture ? mat.normalTexture->GetImageView() : fallbackNormalView;
             VkSampler normalSampler = mat.normalTexture ? mat.normalTexture->GetSampler() : fallbackSampler;
 
-            VkImageView mraView = mat.metallicRoughnessTexture ? mat.metallicRoughnessTexture->GetImageView() : fallbackView;
+            // MRA 贴图暂时用 Albedo 顶替（最好是纯白/纯黑图，为了简便先这样）
+            VkImageView mraView = mat.metallicRoughnessTexture ? mat.metallicRoughnessTexture->GetImageView() : fallbackAlbedoView;
             VkSampler mraSampler = mat.metallicRoughnessTexture ? mat.metallicRoughnessTexture->GetSampler() : fallbackSampler;
 
             std::array<VkDescriptorImageInfo, 3> imageInfos{};

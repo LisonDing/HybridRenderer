@@ -78,19 +78,45 @@ layout(push_constant) uniform MaterialPushConstant {
 void main() {
     outPosition = vec4(fragPos, 1.0);
     
-    // 1. 法线 (暂不采样法线贴图，继续保持白模平滑法线以便观察)
-    vec3 worldNormal = normalize(fragNormal);
+    // ==========================================
+    // 1. 构建 TBN 矩阵 (切线空间 -> 世界空间)
+    // ==========================================
+    vec3 N = normalize(fragNormal);
+    vec3 T = normalize(fragTangent);
     
-    // 2. 采样 Albedo 贴图并与基础颜色相乘
-    // 注：即使现在没有绑定真实的贴图数据，纹理采样器也会返回 vec4(0) 结合 PushConstant 依然能渲染出白模
+    // 【硬核细节】：Gram-Schmidt 正交化
+    // 因为光栅化插值会导致 T 和 N 夹角不再是完美的 90 度，我们需要将 T 强制拉回与 N 垂直的平面
+    T = normalize(T - dot(T, N) * N);
+    
+    // 叉乘计算副切线 (Bitangent/Binormal)
+    vec3 B = cross(N, T);
+    
+    // 组装 TBN 矩阵
+    mat3 TBN = mat3(T, B, N);
+
+    // ==========================================
+    // 2. 采样并解析法线贴图
+    // ==========================================
+    // 法线贴图的 RGB 范围是 [0, 1]，而真正的法线向量范围是 [-1, 1]
+    vec3 tangentNormal = texture(normalMap, fragTexCoord).rgb;
+    tangentNormal = tangentNormal * 2.0 - 1.0;
+    
+    // 如果该材质没有任何法线起伏（例如读取的保底贴图是平坦的），切线空间法线会是 (0,0,1)
+    
+    // 【核心魔法】：将法线贴图里的微小凹凸，通过 TBN 矩阵扭转到真实的世界三维空间中
+    vec3 worldNormal = normalize(TBN * tangentNormal);
+
+    // ==========================================
+    // 3. PBR 材质参数采样 (保持不变)
+    // ==========================================
     vec4 texColor = texture(albedoMap, fragTexCoord);
     vec3 albedo = (texColor.rgb * matPC.baseColorFactor.rgb);
     
-    // 3. 采样 MRA 贴图
     vec4 mra = texture(mraMap, fragTexCoord);
-    float metallic = mra.b * matPC.metallicFactor;   // glTF 标准：B 通道存储金属度
-    float roughness = mra.g * matPC.roughnessFactor; // glTF 标准：G 通道存储粗糙度
+    float metallic = mra.b * matPC.metallicFactor;  
+    float roughness = mra.g * matPC.roughnessFactor; 
 
+    // 写入 G-Buffer
     outNormal = vec4(worldNormal, metallic);
     outAlbedo = vec4(albedo, roughness);
 }
