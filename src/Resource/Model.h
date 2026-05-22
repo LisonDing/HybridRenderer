@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <memory>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -11,6 +12,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/hash.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include "../Resource/Texture.h"
 
 namespace Renderer { class VulkanContext; }
 
@@ -91,6 +93,11 @@ namespace Resource {
         glm::vec4 baseColorFactor = glm::vec4(1.0f);
         float metallicFactor = 0.0f;
         float roughnessFactor = 0.5f;
+
+        // 【新增】：真正在显存中的贴图对象指针
+        std::shared_ptr<Texture2D> albedoTexture;
+        std::shared_ptr<Texture2D> normalTexture;
+        std::shared_ptr<Resource::Texture2D> metallicRoughnessTexture; // 根据你的命名空间调整
     };
 
     // 【新增】子网格定义 (拆分 Draw Call 的最小单元)

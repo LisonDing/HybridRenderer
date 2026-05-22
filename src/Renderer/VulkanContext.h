@@ -286,10 +286,14 @@ private:
 
     // Descriptor Sets
     // 描述符与统一缓冲资源
-    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+    // VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_GlobalSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_MaterialSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool      m_DescriptorPool = VK_NULL_HANDLE;
     // VkDescriptorPool      m_ImGuiDescriptorPool = VK_NULL_HANDLE; // 专门为 ImGui 创建的描述符池
-    std::vector<VkDescriptorSet> m_DescriptorSets;
+    // std::vector<VkDescriptorSet> m_DescriptorSets;
+    std::vector<VkDescriptorSet> m_GlobalDescriptorSets;   // 对应 Set 0 (UBO，每帧一个)
+    std::vector<VkDescriptorSet> m_MaterialDescriptorSets; // 对应 Set 1 (贴图，每种材质一个)
     std::vector<VkBuffer>       m_UniformBuffers;
     std::vector<VkDeviceMemory> m_UniformBuffersMemory;
     std::vector<void*>          m_UniformBuffersMapped;

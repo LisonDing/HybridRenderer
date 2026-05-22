@@ -54,22 +54,14 @@ layout(location = 4) in vec3 fragTangent; // 接收切线向量以便在片段�
 // MRT
 // 片段着色器接受来自顶点着色器的多个输出（颜色、纹理坐标、法线、位置），并将计算结果写入多个渲染目标（G-Buffer）。
 
-// 采样基础纹理
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
-    mat4 view;
-    mat4 proj;
-    vec3 lightDir;
-    vec3 viewPos;
-    float metallic;  // 接收金属度
-    float roughness; // 接收粗糙度
-} ubo;
+
 // layout(binding = 1) uniform sampler2D texSampler;
 // layout(binding = 2) uniform sampler2D normalMap;
 
 // 暂时保留绑定的贴图，防止 Vulkan 报错，但我们先不采样它们
-layout(binding = 1) uniform sampler2D albedoMap;
-layout(binding = 2) uniform sampler2D normalMap;
+layout(set = 1, binding = 0) uniform sampler2D albedoMap;
+layout(set = 1, binding = 1) uniform sampler2D normalMap;
+layout(set = 1, binding = 2) uniform sampler2D mraMap;
 
 layout(location = 0) out vec4 outPosition; // G-Buffer 1: 存储世界空间位置
 layout(location = 1) out vec4 outNormal;   // G-Buffer 2: 存储法线信息
@@ -86,15 +78,19 @@ layout(push_constant) uniform MaterialPushConstant {
 void main() {
     outPosition = vec4(fragPos, 1.0);
     
-    // 【白模模式】：暂时不用法线贴图，直接使用平滑的顶点法线
+    // 1. 法线 (暂不采样法线贴图，继续保持白模平滑法线以便观察)
     vec3 worldNormal = normalize(fragNormal);
     
-    // 将 Push Constant 传来的金属度打包进法线的 Alpha 通道
-    outNormal = vec4(worldNormal, matPC.metallicFactor);
+    // 2. 采样 Albedo 贴图并与基础颜色相乘
+    // 注：即使现在没有绑定真实的贴图数据，纹理采样器也会返回 vec4(0) 结合 PushConstant 依然能渲染出白模
+    vec4 texColor = texture(albedoMap, fragTexCoord);
+    vec3 albedo = (texColor.rgb * matPC.baseColorFactor.rgb);
     
-    // 【白模模式】：不采样 Albedo 贴图，直接使用 GLTF 材质里的 BaseColor
-    vec3 albedo = matPC.baseColorFactor.rgb;
-    
-    // 将 Push Constant 传来的粗糙度打包进颜色的 Alpha 通道
-    outAlbedo = vec4(albedo, matPC.roughnessFactor);
+    // 3. 采样 MRA 贴图
+    vec4 mra = texture(mraMap, fragTexCoord);
+    float metallic = mra.b * matPC.metallicFactor;   // glTF 标准：B 通道存储金属度
+    float roughness = mra.g * matPC.roughnessFactor; // glTF 标准：G 通道存储粗糙度
+
+    outNormal = vec4(worldNormal, metallic);
+    outAlbedo = vec4(albedo, roughness);
 }

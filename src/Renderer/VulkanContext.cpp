@@ -504,10 +504,12 @@ void VulkanContext::CreateGraphicsPipeline() {
     // 大小：vec4 (16字节) + 2个float (8字节) = 24 字节
     pushConstantRange.size = sizeof(glm::vec4) + sizeof(float) * 2;
 
+    VkDescriptorSetLayout setLayouts[] = {m_GlobalSetLayout, m_MaterialSetLayout};
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &m_DescriptorSetLayout;
+    pipelineLayoutInfo.setLayoutCount = 2;
+    pipelineLayoutInfo.pSetLayouts = setLayouts;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
@@ -1220,35 +1222,44 @@ void VulkanContext::CreateDescriptorSetLayout() {
     uboLayoutBinding.binding = 0;
     uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; 
+    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-    // New binding for the Image Sampler at index 1.
-    // 针对索引 1 新增的图像采样器绑定。
-    VkDescriptorSetLayoutBinding samplerLayoutBinding{};
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = nullptr;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutCreateInfo globalLayoutInfo{};
+    globalLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    globalLayoutInfo.bindingCount = 1;
+    globalLayoutInfo.pBindings = &uboLayoutBinding;
 
-    // New binding for the Normal Map Sampler at index 2.
-    // 针对索引 2 新增的法线贴图采样器绑定。
-    VkDescriptorSetLayoutBinding normalMapLayoutBinding{};
-    normalMapLayoutBinding.binding = 2;
-    normalMapLayoutBinding.descriptorCount = 1;
-    normalMapLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    normalMapLayoutBinding.pImmutableSamplers = nullptr;
-    normalMapLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (vkCreateDescriptorSetLayout(m_Device, &globalLayoutInfo, nullptr, &m_GlobalSetLayout) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create global descriptor set layout!");
+    }
 
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings = {uboLayoutBinding, samplerLayoutBinding, normalMapLayoutBinding};
+   std::array<VkDescriptorSetLayoutBinding, 3> materialBindings{};
+    
+    // Albedo Map
+    materialBindings[0].binding = 0;
+    materialBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    materialBindings[0].descriptorCount = 1;
+    materialBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    
+    // Normal Map
+    materialBindings[1].binding = 1;
+    materialBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    materialBindings[1].descriptorCount = 1;
+    materialBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
+    // Metallic-Roughness Map
+    materialBindings[2].binding = 2;
+    materialBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    materialBindings[2].descriptorCount = 1;
+    materialBindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    if (vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to create descriptor set layout!");
+    VkDescriptorSetLayoutCreateInfo materialLayoutInfo{};
+    materialLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    materialLayoutInfo.bindingCount = static_cast<uint32_t>(materialBindings.size());
+    materialLayoutInfo.pBindings = materialBindings.data();
+
+    if (vkCreateDescriptorSetLayout(m_Device, &materialLayoutInfo, nullptr, &m_MaterialSetLayout) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create material descriptor set layout!");
     }
 }
 
@@ -1297,35 +1308,45 @@ void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& 
 }
 
 void VulkanContext::CreateDescriptorPool() {
+    const auto& materials = m_MainModel.GetMaterials();
+    uint32_t materialCount = materials.empty() ? 1 : static_cast<uint32_t>(materials.size());
+    uint32_t frameCount = static_cast<uint32_t>(m_SwapchainImages.size());
+
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    // UBO 槽位：渲染场景 (frameCount) + 后处理管线 (frameCount)
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 4);
+    poolSizes[0].descriptorCount = frameCount * 2; 
+    
+    // 采样器槽位：材质贴图 (materialCount * 3) + 后处理读取 G-Buffer (frameCount * 3)
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(m_SwapchainImages.size() * 8); // 3D 渲染和后处理都需要采样器描述符
+    poolSizes[1].descriptorCount = materialCount * 3 + frameCount * 3 + 10; 
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = static_cast<uint32_t>(m_SwapchainImages.size() * 2);
+    // 总 Set 数量：场景UBO + 材质库 + 后处理
+    poolInfo.maxSets = frameCount * 2 + materialCount;
 
     if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to create descriptor pool!");
+        throw std::runtime_error("failed to create descriptor pool!");
     }
 }
 
 void VulkanContext::CreateDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(m_SwapchainImages.size(), m_DescriptorSetLayout);
-    
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_DescriptorPool;
-    allocInfo.descriptorSetCount = static_cast<uint32_t>(m_SwapchainImages.size());
-    allocInfo.pSetLayouts = layouts.data();
+    // ==========================================
+    // 1. 分配并更新 Set 0: 全局 UBO (每帧一个)
+    // ==========================================
+    std::vector<VkDescriptorSetLayout> globalLayouts(m_SwapchainImages.size(), m_GlobalSetLayout);
+    VkDescriptorSetAllocateInfo globalAllocInfo{};
+    globalAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    globalAllocInfo.descriptorPool = m_DescriptorPool;
+    globalAllocInfo.descriptorSetCount = static_cast<uint32_t>(m_SwapchainImages.size());
+    globalAllocInfo.pSetLayouts = globalLayouts.data();
 
-    m_DescriptorSets.resize(m_SwapchainImages.size());
-    if (vkAllocateDescriptorSets(m_Device, &allocInfo, m_DescriptorSets.data()) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to allocate descriptor sets!");
+    m_GlobalDescriptorSets.resize(m_SwapchainImages.size());
+    if (vkAllocateDescriptorSets(m_Device, &globalAllocInfo, m_GlobalDescriptorSets.data()) != VK_SUCCESS) {
+        throw std::runtime_error("failed to allocate global descriptor sets!");
     }
 
     for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
@@ -1334,48 +1355,78 @@ void VulkanContext::CreateDescriptorSets() {
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UniformBufferObject);
 
-        // Define the image info specifying the image view and sampler.
-        // 定义图像信息，指定具体的图像视图与采样器。
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = m_AlbedoMap.GetImageView();
-        imageInfo.sampler = m_AlbedoMap.GetSampler();
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = m_GlobalDescriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pBufferInfo = &bufferInfo;
 
-        VkDescriptorImageInfo normalMapInfo{};
-        normalMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        normalMapInfo.imageView = m_NormalMap.GetImageView();
-        normalMapInfo.sampler = m_NormalMap.GetSampler();
-
-        std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
-
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = m_DescriptorSets[i];
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pBufferInfo = &bufferInfo;
-
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].dstSet = m_DescriptorSets[i];
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].dstArrayElement = 0;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &imageInfo;
-
-        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[2].dstSet = m_DescriptorSets[i];
-        descriptorWrites[2].dstBinding = 2;
-        descriptorWrites[2].dstArrayElement = 0; 
-        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[2].descriptorCount = 1;
-        descriptorWrites[2].pImageInfo = &normalMapInfo;
-
-        vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+        vkUpdateDescriptorSets(m_Device, 1, &descriptorWrite, 0, nullptr);
     }
 
-    // 后期处理的描述符集
+    // ==========================================
+    // 2. 分配并更新 Set 1: 材质贴图 (每个材质一个)
+    // ==========================================
+    const auto& materials = m_MainModel.GetMaterials();
+    if (!materials.empty()) {
+        std::vector<VkDescriptorSetLayout> materialLayouts(materials.size(), m_MaterialSetLayout);
+        VkDescriptorSetAllocateInfo matAllocInfo{};
+        matAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        matAllocInfo.descriptorPool = m_DescriptorPool;
+        matAllocInfo.descriptorSetCount = static_cast<uint32_t>(materials.size());
+        matAllocInfo.pSetLayouts = materialLayouts.data();
+
+        m_MaterialDescriptorSets.resize(materials.size());
+        if (vkAllocateDescriptorSets(m_Device, &matAllocInfo, m_MaterialDescriptorSets.data()) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate material descriptor sets!");
+        }
+
+        // 【核心修复】：使用全局已加载好的 m_AlbedoMap 作为绝对安全的保底贴图，彻底告别空指针！
+        VkImageView fallbackView = m_AlbedoMap.GetImageView();
+        VkSampler fallbackSampler = m_AlbedoMap.GetSampler();
+
+        for (size_t i = 0; i < materials.size(); i++) {
+            const auto& mat = materials[i];
+
+            VkImageView albedoView = mat.albedoTexture ? mat.albedoTexture->GetImageView() : fallbackView;
+            VkSampler albedoSampler = mat.albedoTexture ? mat.albedoTexture->GetSampler() : fallbackSampler;
+
+            VkImageView normalView = mat.normalTexture ? mat.normalTexture->GetImageView() : fallbackView;
+            VkSampler normalSampler = mat.normalTexture ? mat.normalTexture->GetSampler() : fallbackSampler;
+
+            VkImageView mraView = mat.metallicRoughnessTexture ? mat.metallicRoughnessTexture->GetImageView() : fallbackView;
+            VkSampler mraSampler = mat.metallicRoughnessTexture ? mat.metallicRoughnessTexture->GetSampler() : fallbackSampler;
+
+            std::array<VkDescriptorImageInfo, 3> imageInfos{};
+            imageInfos[0].sampler = albedoSampler;
+            imageInfos[0].imageView = albedoView;
+            imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            imageInfos[1].sampler = normalSampler;
+            imageInfos[1].imageView = normalView;
+            imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            imageInfos[2].sampler = mraSampler;
+            imageInfos[2].imageView = mraView;
+            imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+            for(int j=0; j<3; ++j) {
+                descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[j].dstSet = m_MaterialDescriptorSets[i];
+                descriptorWrites[j].dstBinding = j;
+                descriptorWrites[j].dstArrayElement = 0;
+                descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[j].descriptorCount = 1;
+                descriptorWrites[j].pImageInfo = &imageInfos[j];
+            }
+            vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+        }
+    }
+
     std::vector<VkDescriptorSetLayout> ppLayouts(m_SwapchainImages.size(), m_PostProcessDescriptorSetLayout);
     VkDescriptorSetAllocateInfo ppAllocInfo{};
     ppAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1385,41 +1436,48 @@ void VulkanContext::CreateDescriptorSets() {
 
     m_PostProcessDescriptorSets.resize(m_SwapchainImages.size());
     if (vkAllocateDescriptorSets(m_Device, &ppAllocInfo, m_PostProcessDescriptorSets.data()) != VK_SUCCESS) {
-        HR_LOG_ERROR("VulkanContext: Failed to allocate Post-Process Descriptor Sets!");
+        throw std::runtime_error("failed to allocate post process descriptor sets!");
     }
 
-    // 将离屏贴图绑定给后处理管线
     for (size_t i = 0; i < m_SwapchainImages.size(); i++) {
-        std::array<VkDescriptorImageInfo, 3> imageInfos{};
-        imageInfos[0] = {m_GBufferSampler, m_GBufferPositionImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}; // 位置 G-Buffer
-        imageInfos[1] = {m_GBufferSampler, m_GBufferNormalImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};   // 法线 G-Buffer
-        imageInfos[2] = {m_GBufferSampler, m_GBufferAlbedoImageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};   // 反照率 G-Buffer
+        std::array<VkDescriptorImageInfo, 3> gBufferInfos{};
+        gBufferInfos[0].sampler = m_GBufferSampler;
+        gBufferInfos[0].imageView = m_GBufferPositionImageView;
+        gBufferInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = m_UniformBuffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
+        gBufferInfos[1].sampler = m_GBufferSampler;
+        gBufferInfos[1].imageView = m_GBufferNormalImageView;
+        gBufferInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
-        for (size_t j = 0; j < 3; j++) {
-            descriptorWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[j].dstSet = m_PostProcessDescriptorSets[i];
-            descriptorWrites[j].dstBinding = j;
-            descriptorWrites[j].dstArrayElement = 0;
-            descriptorWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[j].descriptorCount = 1;
-            descriptorWrites[j].pImageInfo = &imageInfos[j];
+        gBufferInfos[2].sampler = m_GBufferSampler;
+        gBufferInfos[2].imageView = m_GBufferAlbedoImageView;
+        gBufferInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = m_UniformBuffers[i];
+        uboInfo.offset = 0;
+        uboInfo.range = sizeof(UniformBufferObject);
+
+        std::array<VkWriteDescriptorSet, 4> ppWrites{};
+        for(uint32_t j = 0; j < 3; j++) {
+            ppWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            ppWrites[j].dstSet = m_PostProcessDescriptorSets[i];
+            ppWrites[j].dstBinding = j;
+            ppWrites[j].dstArrayElement = 0;
+            ppWrites[j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            ppWrites[j].descriptorCount = 1;
+            ppWrites[j].pImageInfo = &gBufferInfos[j];
         }
 
-        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[3].dstSet = m_PostProcessDescriptorSets[i];
-        descriptorWrites[3].dstBinding = 3;
-        descriptorWrites[3].dstArrayElement = 0;
-        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[3].descriptorCount = 1;
-        descriptorWrites[3].pBufferInfo = &bufferInfo;
+        ppWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        ppWrites[3].dstSet = m_PostProcessDescriptorSets[i];
+        ppWrites[3].dstBinding = 3;
+        ppWrites[3].dstArrayElement = 0;
+        ppWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        ppWrites[3].descriptorCount = 1;
+        ppWrites[3].pBufferInfo = &uboInfo;
 
-        vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
+        vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(ppWrites.size()), ppWrites.data(), 0, nullptr);
     }
 }
 
@@ -1764,7 +1822,7 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
     vkCmdBindIndexBuffer(m_CommandBuffer, m_MainModel.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_DescriptorSets[imageIndex], 0, nullptr);
+    vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_GlobalDescriptorSets[imageIndex], 0, nullptr);
     // vkCmdDrawIndexed(m_CommandBuffer, m_MainModel.GetIndexCount(), 1, 0, 0, 0);
 
     // 【核心魔法】：遍历并绘制每一个 SubMesh
@@ -1774,6 +1832,9 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     for (const auto& subMesh : subMeshes) {
         // 1. 获取当前部件的材质
         const auto& mat = materials[subMesh.materialIndex];
+
+        vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 
+                                    1, 1, &m_MaterialDescriptorSets[subMesh.materialIndex], 0, nullptr);
 
         // 2. 准备推送数据
         struct {
@@ -1959,8 +2020,11 @@ void VulkanContext::Cleanup() {
     if (m_DescriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
     }
-    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+    if (m_GlobalSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_GlobalSetLayout, nullptr);
+    }
+    if (m_MaterialSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_MaterialSetLayout, nullptr);
     }
     for (size_t i = 0; i < m_UniformBuffers.size(); i++) {
         vkDestroyBuffer(m_Device, m_UniformBuffers[i], nullptr);

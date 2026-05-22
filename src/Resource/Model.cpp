@@ -14,6 +14,8 @@ namespace Resource {
 
     bool Model::LoadGLTF(const std::string& path, Renderer::VulkanContext& vkContext) {
         tinygltf::Model gltfModel;
+        // 贴图缓存：路径 -> 贴图对象
+        std::unordered_map<std::string, std::shared_ptr<Texture2D>> textureCache;
         tinygltf::TinyGLTF loader;
         std::string err, warn;
 
@@ -59,6 +61,36 @@ namespace Resource {
             if (mrTexIndex >= 0) {
                 int imageIndex = gltfModel.textures[mrTexIndex].source;
                 material.metallicRoughnessMapPath = baseDir + gltfModel.images[imageIndex].uri;
+            }
+
+            // 1. Albedo 贴图
+            if (!material.albedoMapPath.empty()) {
+                if (textureCache.find(material.albedoMapPath) == textureCache.end()) {
+                    auto tex = std::make_shared<Texture2D>();
+                    tex->LoadFromFile(material.albedoMapPath, vkContext); 
+                    textureCache[material.albedoMapPath] = tex;
+                }
+                material.albedoTexture = textureCache[material.albedoMapPath];
+            }
+
+            // 2. Normal 贴图 (同理)
+            if (!material.normalMapPath.empty()) {
+                if (textureCache.find(material.normalMapPath) == textureCache.end()) {
+                    auto tex = std::make_shared<Texture2D>();
+                    tex->LoadFromFile(material.normalMapPath, vkContext);
+                    textureCache[material.normalMapPath] = tex;
+                }
+                material.normalTexture = textureCache[material.normalMapPath];
+            }
+
+            // 3. MetallicRoughness 贴图 (同理)
+            if (!material.metallicRoughnessMapPath.empty()) {
+                if (textureCache.find(material.metallicRoughnessMapPath) == textureCache.end()) {
+                    auto tex = std::make_shared<Texture2D>();
+                    tex->LoadFromFile(material.metallicRoughnessMapPath, vkContext);
+                    textureCache[material.metallicRoughnessMapPath] = tex;
+                }
+                material.metallicRoughnessTexture = textureCache[material.metallicRoughnessMapPath];
             }
 
             m_Materials.push_back(material);
