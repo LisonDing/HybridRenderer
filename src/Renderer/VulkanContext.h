@@ -109,6 +109,9 @@ struct UniformBufferObject {
     // alignas(4) float specularStrength; // 镜面光强度
     alignas(4) float metallic;  // 【PBR】金属度
     alignas(4) float roughness; // 【PBR】粗糙度
+
+    // 【新增】：光源的投影与观察矩阵组合
+    alignas(16) glm::mat4 lightSpaceMatrix;
 };
 
 // Stores the indices of available Vulkan queue families.
@@ -149,6 +152,7 @@ public:
     void CreateImageViews();
     void CreateRenderPass();
     void CreateGraphicsPipeline();
+    void CreateShadowPipeline();
     void CreateFramebuffers();
 
     // --- Commands & Synchronization ---
@@ -199,6 +203,9 @@ public:
     void CreatePostProcessRenderPass(); 
     void CreatePostProcessPipeline();
 
+    // --- Shadow Mapping Resources ---
+    void CreateShadowResources();
+
     // --- Execution ---
     void DrawFrame(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& viewPos,const glm::vec3& lightPos, float metallic, float roughness, float exposure, float vignette,std::function<void(VkCommandBuffer)> uiRenderCallback = nullptr); 
     void Cleanup();
@@ -212,6 +219,7 @@ private:
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
     // void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
     VkSampleCountFlagBits GetMaxUsableSampleCount(); // Helper to query the maximum supported MSAA sample count for the device.
+    
 
     // Core Vulkan Handles
     // Vulkan 核心层级句柄
@@ -333,6 +341,19 @@ private:
     VkFormat       m_GBufferAlbedoFormat = VK_FORMAT_R8G8B8A8_UNORM; // 颜色格式
     // 通用采样器
     VkSampler      m_GBufferSampler = VK_NULL_HANDLE;
+
+    const uint32_t SHADOW_MAP_SIZE = 4096; // 4K 极高画质阴影贴图
+    // --- Shadow Mapping Resources ---
+    VkImage        m_ShadowImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_ShadowImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_ShadowImageView = VK_NULL_HANDLE;
+    VkSampler      m_ShadowSampler = VK_NULL_HANDLE;
+    VkRenderPass   m_ShadowRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer  m_ShadowFramebuffer = VK_NULL_HANDLE;
+    
+    // 阴影专用管线
+    VkPipelineLayout m_ShadowPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline       m_ShadowPipeline = VK_NULL_HANDLE;
 };
 
 } // namespace Renderer

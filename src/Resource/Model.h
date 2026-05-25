@@ -22,7 +22,7 @@ namespace Renderer {
         glm::vec3 color;
         glm::vec2 texCoord; 
         glm::vec3 normal;
-        glm::vec3 tangent; 
+        glm::vec4 tangent;
 
         bool operator==(const Vertex& other) const {
             return pos == other.pos && color == other.color && 
@@ -61,7 +61,7 @@ namespace Renderer {
             // 切线属性
             attributeDescriptions[4].binding = 0;
             attributeDescriptions[4].location = 4;
-            attributeDescriptions[4].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attributeDescriptions[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
             attributeDescriptions[4].offset = offsetof(Vertex, tangent);
 
             return attributeDescriptions;

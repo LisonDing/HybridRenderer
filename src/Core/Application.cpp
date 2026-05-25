@@ -66,6 +66,8 @@ namespace Core {
         m_VkContext.CreateGraphicsPipeline();
         m_VkContext.CreateDepthResources();
         m_VkContext.CreateOffscreenResources();
+        m_VkContext.CreateShadowResources();
+        m_VkContext.CreateShadowPipeline();
         m_VkContext.CreatePostProcessRenderPass();
         m_VkContext.CreateFramebuffers();
 

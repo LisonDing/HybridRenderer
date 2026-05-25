@@ -541,6 +541,7 @@ void VulkanContext::CreateGraphicsPipeline() {
     }
     HR_LOG_INFO("VulkanContext: Graphics Pipeline created successfully.");
 
+
     vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
     vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
 }
@@ -1304,6 +1305,27 @@ void VulkanContext::UpdateUniformBuffer(uint32_t currentImage, const glm::mat4& 
     ubo.metallic = metallic;
     ubo.roughness = roughness;
 
+    // ==========================================
+    // 【新增】：计算上帝视角 (Light Space Matrix)
+    // ==========================================
+    // 1. 光源的投影矩阵：使用正交投影 (因为是平行光)，覆盖 Sponza 的大致物理范围 (±20米)
+    glm::mat4 lightProjection = glm::ortho(-40.0f, 40.0f, -40.0f, 40.0f, 1.0f, 150.0f);
+    lightProjection[1][1] *= -1; // 修正 Vulkan 的 Y 轴朝下问题
+
+    // 2. 光源的观察矩阵：顺着光线方向，从 50 米外的高空看向原点
+    // glm::vec3 virtualLightPos = -lightDir * 50.0f; 
+    // 【核心修复】：防止 lookAt 奇点坍缩
+    glm::vec3 lightDirNorm = glm::normalize(lightDir);
+    glm::vec3 virtualLightPos = -lightDirNorm * 50.0f;
+    glm::vec3 lightUp = glm::vec3(0.0f, 1.0f, 0.0f);
+    // 如果光线几乎垂直上下（平行于 Y 轴），则将 Up 向量临时切换为 Z 轴
+    if (std::abs(lightDirNorm.y) > 0.99f) {
+        lightUp = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    glm::mat4 lightView = glm::lookAt(virtualLightPos, glm::vec3(0.0f), lightUp);
+    ubo.lightSpaceMatrix = lightProjection * lightView;
+
     memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
 
@@ -1462,7 +1484,13 @@ void VulkanContext::CreateDescriptorSets() {
         uboInfo.offset = 0;
         uboInfo.range = sizeof(UniformBufferObject);
 
-        std::array<VkWriteDescriptorSet, 4> ppWrites{};
+        // 【新增】：装载阴影贴图信息
+        VkDescriptorImageInfo shadowInfo{};
+        shadowInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        shadowInfo.imageView = m_ShadowImageView;
+        shadowInfo.sampler = m_ShadowSampler;
+
+        std::array<VkWriteDescriptorSet, 5> ppWrites{};
         for(uint32_t j = 0; j < 3; j++) {
             ppWrites[j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             ppWrites[j].dstSet = m_PostProcessDescriptorSets[i];
@@ -1480,6 +1508,15 @@ void VulkanContext::CreateDescriptorSets() {
         ppWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         ppWrites[3].descriptorCount = 1;
         ppWrites[3].pBufferInfo = &uboInfo;
+
+        // 【新增】：写入第 5 个槽位 (binding = 4)
+        ppWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        ppWrites[4].dstSet = m_PostProcessDescriptorSets[i];
+        ppWrites[4].dstBinding = 4;
+        ppWrites[4].dstArrayElement = 0;
+        ppWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        ppWrites[4].descriptorCount = 1;
+        ppWrites[4].pImageInfo = &shadowInfo;
 
         vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(ppWrites.size()), ppWrites.data(), 0, nullptr);
     }
@@ -1593,6 +1630,100 @@ void VulkanContext::CreateSyncObjects() {
 
 // }
 
+void VulkanContext::CreateShadowResources() {
+    VkFormat depthFormat = FindDepthFormat();
+
+    // 1. 创建阴影深度贴图 (4096 x 4096)
+    CreateImage(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 1, VK_SAMPLE_COUNT_1_BIT, depthFormat,
+                VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_ShadowImage, m_ShadowImageMemory);
+
+    m_ShadowImageView = CreateImageView(m_ShadowImage, depthFormat, 1);
+
+    // 2. 创建阴影专用采样器 (开启硬件深度比较，为了后续做 PCF 软阴影)
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    // 【核心细节】：将超出边界的区域设为纯白(1.0)，意味着在光照范围之外的地方默认没有阴影
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE; 
+    samplerInfo.compareEnable = VK_TRUE;
+    samplerInfo.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    
+    if (vkCreateSampler(m_Device, &samplerInfo, nullptr, &m_ShadowSampler) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create shadow sampler!");
+    }
+
+    // 3. 创建阴影专用的 Render Pass (纯深度，无颜色输出)
+    VkAttachmentDescription attachmentDescription{};
+    attachmentDescription.format = depthFormat;
+    attachmentDescription.samples = VK_SAMPLE_COUNT_1_BIT;
+    attachmentDescription.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;       // 每帧开始前清空
+    attachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;     // 【关键】：必须 Store，因为接下来的主渲染要读取它
+    attachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachmentDescription.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL; // 结束后转为可读布局
+
+    VkAttachmentReference depthReference = {};
+    depthReference.attachment = 0;
+    depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 0; // 纯深度渲染
+    subpass.pDepthStencilAttachment = &depthReference;
+
+    // 严谨的子通道依赖：确保阴影写完后，主 Pass 才能读
+    VkSubpassDependency dependencies[2]{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    VkRenderPassCreateInfo renderPassInfo = {};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments = &attachmentDescription;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+    renderPassInfo.dependencyCount = 2;
+    renderPassInfo.pDependencies = dependencies;
+
+    if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_ShadowRenderPass) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create shadow render pass!");
+    }
+
+    // 4. 创建阴影 Framebuffer
+    VkFramebufferCreateInfo framebufferInfo = {};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = m_ShadowRenderPass;
+    framebufferInfo.attachmentCount = 1;
+    framebufferInfo.pAttachments = &m_ShadowImageView;
+    framebufferInfo.width = SHADOW_MAP_SIZE;
+    framebufferInfo.height = SHADOW_MAP_SIZE;
+    framebufferInfo.layers = 1;
+
+    if (vkCreateFramebuffer(m_Device, &framebufferInfo, nullptr, &m_ShadowFramebuffer) != VK_SUCCESS) {
+        HR_LOG_ERROR("VulkanContext: Failed to create shadow framebuffer!");
+    }
+    
+    HR_LOG_INFO("VulkanContext: Shadow Resources allocated successfully (4K).");
+}
+
 void VulkanContext::CreateOffscreenResources() {
     // Position G-Buffer
     CreateImage(m_SwapchainExtent.width, m_SwapchainExtent.height, 1, VK_SAMPLE_COUNT_1_BIT, m_GBufferPositionFormat,
@@ -1688,7 +1819,7 @@ void VulkanContext::CreatePostProcessPipeline() {
     // samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     
     // 3个G-Buffer采样器和1个离屏采样器共4个绑定
-    std::array<VkDescriptorSetLayoutBinding, 4> blndings{};
+    std::array<VkDescriptorSetLayoutBinding, 5> blndings{};
     for (uint32_t i = 0; i < 3; i++) {
         blndings[i].binding = i;
         blndings[i].descriptorCount = 1;
@@ -1702,6 +1833,13 @@ void VulkanContext::CreatePostProcessPipeline() {
     blndings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     blndings[3].pImmutableSamplers = nullptr;
     blndings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;  
+
+    // 【新增】：阴影贴图采样器
+    blndings[4].binding = 4;
+    blndings[4].descriptorCount = 1;
+    blndings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    blndings[4].pImmutableSamplers = nullptr;
+    blndings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1784,6 +1922,96 @@ void VulkanContext::CreatePostProcessPipeline() {
     HR_LOG_INFO("VulkanContext: Post-Process Pipeline created.");
 }
 
+void VulkanContext::CreateShadowPipeline() {
+    auto vertShaderCode = ReadFile("bin/shaders/shadow.vert.spv");
+    VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
+
+    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStageInfo.module = vertShaderModule;
+    vertShaderStageInfo.pName = "main";
+
+    // 注意：没有片段着色器！(纯深度渲染)
+    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo};
+
+    auto bindingDescription = Vertex::GetBindingDescription();
+    auto attributeDescriptions = Vertex::GetAttributeDescriptions();
+
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+    // 视口与裁剪 (锁定 4K 分辨率)
+    VkViewport viewport{0.0f, 0.0f, (float)SHADOW_MAP_SIZE, (float)SHADOW_MAP_SIZE, 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}};
+    VkPipelineViewportStateCreateInfo viewportState{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, nullptr, 0, 1, &viewport, 1, &scissor};
+
+    // ==========================================
+    // 【核心魔法】：光栅化器深度黑科技
+    // ==========================================
+    VkPipelineRasterizationStateCreateInfo rasterizer{};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    // 剔除正面，只画背面，这是防止自我阴影重叠的最佳方案
+    rasterizer.cullMode = VK_CULL_MODE_NONE; 
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    
+    // 开启深度偏移，将深度强制往后推一点点，彻底消除 Shadow Acne
+    rasterizer.depthBiasEnable = VK_TRUE; 
+    rasterizer.depthBiasConstantFactor = 1.25f;
+    rasterizer.depthBiasSlopeFactor = 1.75f;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthWriteEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    VkPipelineMultisampleStateCreateInfo multisampling{};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT; // 阴影不需要 MSAA
+
+    // 阴影管线只需要全局 UBO，复用 m_GlobalSetLayout
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 1;
+    pipelineLayoutInfo.pSetLayouts = &m_GlobalSetLayout;
+
+    if (vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_ShadowPipelineLayout) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create shadow pipeline layout!");
+    }
+
+    VkGraphicsPipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 1;
+    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.pVertexInputState = &vertexInputInfo;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewportState;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.layout = m_ShadowPipelineLayout;
+    pipelineInfo.renderPass = m_ShadowRenderPass; 
+
+    if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_ShadowPipeline) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create shadow pipeline!");
+    }
+
+    vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
+    HR_LOG_INFO("VulkanContext: Shadow Pipeline created successfully.");
+}
+
 void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const glm::vec3& viewPos,const glm::vec3& lightDir, float metallic, float roughness, float exposure, float vignette, std::function<void(VkCommandBuffer)> uiRenderCallback) {
     // Wait for the previous frame to finish GPU execution.
     // 等待上一帧的 GPU 渲染执行完毕。
@@ -1799,6 +2027,39 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(m_CommandBuffer, &beginInfo);
+
+    // ==========================================
+    // 【新增】：Pass 0 - 上帝视角阴影渲染
+    // ==========================================
+    VkRenderPassBeginInfo shadowPassInfo{};
+    shadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    shadowPassInfo.renderPass = m_ShadowRenderPass;
+    shadowPassInfo.framebuffer = m_ShadowFramebuffer;
+    shadowPassInfo.renderArea.offset = {0, 0};
+    shadowPassInfo.renderArea.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+
+    VkClearValue shadowClear{};
+    shadowClear.depthStencil = {1.0f, 0}; // 深度清空为 1.0 (最远)
+    shadowPassInfo.clearValueCount = 1;
+    shadowPassInfo.pClearValues = &shadowClear;
+
+    vkCmdBeginRenderPass(m_CommandBuffer, &shadowPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_ShadowPipeline);
+
+    VkBuffer vertexBuffers[] = {m_MainModel.GetVertexBuffer()};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(m_CommandBuffer, m_MainModel.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+    // 阴影管线只绑定 Set 0 (全局 UBO 里的 lightSpaceMatrix)
+    vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_ShadowPipelineLayout, 0, 1, &m_GlobalDescriptorSets[imageIndex], 0, nullptr);
+
+    // 遍历所有子网格画出它们的形状
+    for (const auto& subMesh : m_MainModel.GetSubMeshes()) {
+        vkCmdDrawIndexed(m_CommandBuffer, subMesh.indexCount, 1, subMesh.firstIndex, 0, 0);
+    }
+
+    vkCmdEndRenderPass(m_CommandBuffer);
 
     // Pass 1: 离屏渲染 3D 场景到 m_OffscreenFramebuffer
     VkRenderPassBeginInfo renderPassInfo{};
@@ -1822,8 +2083,8 @@ void VulkanContext::DrawFrame(const glm::mat4& view, const glm::mat4& proj,const
     vkCmdBeginRenderPass(m_CommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
 
-    VkBuffer vertexBuffers[] = {m_MainModel.GetVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
+    // VkBuffer vertexBuffers[] = {m_MainModel.GetVertexBuffer()};
+    // VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
     vkCmdBindIndexBuffer(m_CommandBuffer, m_MainModel.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
     vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout, 0, 1, &m_GlobalDescriptorSets[imageIndex], 0, nullptr);
@@ -1934,6 +2195,17 @@ void VulkanContext::Cleanup() {
     if (m_Device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_Device); 
     }
+    // 销毁阴影资源
+    if (m_ShadowSampler != VK_NULL_HANDLE) vkDestroySampler(m_Device, m_ShadowSampler, nullptr);
+    if (m_ShadowImageView != VK_NULL_HANDLE) vkDestroyImageView(m_Device, m_ShadowImageView, nullptr);
+    if (m_ShadowImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_Device, m_ShadowImage, nullptr);
+        vkFreeMemory(m_Device, m_ShadowImageMemory, nullptr);
+    }
+    if (m_ShadowFramebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(m_Device, m_ShadowFramebuffer, nullptr);
+    if (m_ShadowRenderPass != VK_NULL_HANDLE) vkDestroyRenderPass(m_Device, m_ShadowRenderPass, nullptr);
+    if (m_ShadowPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(m_Device, m_ShadowPipelineLayout, nullptr);
+    if (m_ShadowPipeline != VK_NULL_HANDLE) vkDestroyPipeline(m_Device, m_ShadowPipeline, nullptr);
 
     // offscreen 资源销毁
     if (m_GBufferSampler != VK_NULL_HANDLE) vkDestroySampler(m_Device, m_GBufferSampler, nullptr);

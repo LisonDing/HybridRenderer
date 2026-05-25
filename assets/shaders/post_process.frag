@@ -44,9 +44,14 @@ layout(binding = 3) uniform UniformBufferObject {
     vec3 viewPos;
     // float ambientStrength;
     // float specularStrength;
-    float padding1; // 占位，保持与之前版本的 uniform buffer 大小一致
-    float padding2; // 占位，保持与之前版本的 uniform buffer 大小一致
+    float metallic; // 占位，保持与之前版本的 uniform buffer 大小一致
+    float roughness; // 占位，保持与之前版本的 uniform buffer 大小一致
+    mat4 lightSpaceMatrix; // 新增：光源空间变换矩阵，用于阴影映射
+    
 } ubo;
+
+// 【新增】：硬件级深度比较采样器
+layout(binding = 4) uniform sampler2DShadow shadowMap;
 
 layout(push_constant) uniform PostProcessParams {
     float exposure;
@@ -138,12 +143,33 @@ void main() {
     // vec3 radiance = vec3(3.0); 
     vec3 radiance = vec3(20.0); // 模拟 HDR 场景中的强光源，此处为方便展示PBR效果，在同样的灯光参数下，PBR 引擎里的漫反射亮度天然只有传统引擎的 三分之一
 
-    // 最终的直接光照 (Lo)
-    vec3 Lo = (kD * albedo / PI + specular) * radiance * NdotL;
-
-    // 极其简单的环境光 (后期可以换成 IBL 基于图像的照明)
-    vec3 ambient = vec3(0.03) * albedo;
+    // ==========================================
+    // 【核心新增】：计算阴影遮挡因子 (Shadow Factor)
+    // ==========================================
+    vec4 fragPosLightSpace = ubo.lightSpaceMatrix * vec4(fragPos, 1.0);
+    // 透视除法
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    // Vulkan 中 XY 坐标需从 [-1, 1] 映射到 UV 的 [0, 1]
+    projCoords.xy = projCoords.xy * 0.5 + 0.5; 
     
+    float shadow = 0.0;
+    // 【严格修复】：对 X, Y, Z 三轴同时做 [0, 1] 范围的合法性检查
+    // 只有完全落在光源视锥体内的数据才允许采样深度图，彻底根治中轴线裂开的惨剧！
+    if (projCoords.x >= 0.0 && projCoords.x <= 1.0 &&
+        projCoords.y >= 0.0 && projCoords.y <= 1.0 &&
+        projCoords.z >= 0.0 && projCoords.z <= 1.0) {
+        // sampler2DShadow 会自动将 projCoords.z 与深度图里存的值做比较。
+        // 返回 1.0 表示“未被遮挡”(照亮)，返回 0.0 表示“被遮挡”(阴影中)。
+        // 配合前面 C++ 设置的双线性过滤 (LINEAR)，它会自动实现免费的 PCF 软阴影边缘！
+        float visibility = texture(shadowMap, vec3(projCoords.xy, projCoords.z));
+        shadow = 1.0 - visibility; 
+    }
+    // ==========================================
+
+    // 【修改】：将直接光照 Lo 乘以 (1.0 - shadow) 以切断被遮挡的光线！
+    vec3 Lo = (kD * albedo / PI + specular) * radiance * NdotL * (1.0 - shadow);
+
+    vec3 ambient = vec3(0.03) * albedo;
     vec3 color = ambient + Lo;
 
     // HDR 色调映射与伽马校正 (PBR 必须在线性空间计算，最后转回 sRGB)

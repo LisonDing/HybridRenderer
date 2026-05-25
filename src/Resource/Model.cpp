@@ -159,9 +159,15 @@ namespace Resource {
                     // 【修改】：如果模型自带切线则读取，否则给一个默认值
                     // 注意：glTF 标准中 TANGENT 是 vec4 (xyz 是方向，w 是副切线符号计算参数)，这里我们只取前 3 个 float
                     if (tangentBuffer) {
-                        vertex.tangent = glm::vec3(tangentBuffer[v * 4], tangentBuffer[v * 4 + 1], tangentBuffer[v * 4 + 2]);
+                        vertex.tangent = glm::vec4(
+                            tangentBuffer[v * 4 + 0], 
+                            tangentBuffer[v * 4 + 1], 
+                            tangentBuffer[v * 4 + 2], 
+                            tangentBuffer[v * 4 + 3]  // 致命的 W 分量！
+                        );
                     } else {
-                        vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f); 
+                        // 如果模型没有切线，给一个默认的 vec4
+                        vertex.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f); 
                     }
 
                     globalVertices.push_back(vertex);
